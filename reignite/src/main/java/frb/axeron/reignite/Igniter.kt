@@ -63,8 +63,12 @@ object Igniter {
         Log.i("test", "AXERON Plugin Manager ($VERSION)")
         println("AXERON Plugin Manager ($VERSION)")
 
+        // Must be read before cleanUpdateDir(): the folders in plugins_update/ are the only record
+        // of which plugins the user ignited by hand (install, uninstall, enable, disable).
+        val staged = stagedPlugins()
         cleanUpdateDir()
-        mainLoop()
+        mainLoop(staged)
+        markBootIgnited()
 
         println("- Completed")
         kotlin.system.exitProcess(0)
@@ -73,13 +77,31 @@ object Igniter {
     // ===============================
     // MAIN LOOP
     // ===============================
-    private fun mainLoop() {
+    private fun mainLoop(staged: Set<String>) {
         val plugins = PLUGINS_DIR.listFiles()?.filter { it.isDirectory }.orEmpty()
 
-        val pending = plugins.any { File(it, "update").exists() || File(it, "remove").exists() }
+        // Plugins the user ignited by hand: a pending update/remove marker, or a staged change
+        // (plugins_update/<id>) such as enable/disable.
+        val targets = plugins
+            .filter { File(it, "update").exists() || File(it, "remove").exists() || it.name in staged }
+            .mapTo(HashSet()) { it.name }
+
+        val pending = targets.isNotEmpty()
+
+        // A manual ignite only touches the plugins that asked for it. It is told apart from the
+        // first ignite after boot (or after the server took every plugin down), which must start
+        // everything, by the boot tag: it is set once an ignite completed and cleared whenever
+        // all plugins are stopped, and, being a property, it does not survive a reboot.
+        val manual = pending && isBootIgnited()
+        if (manual) println("- Manual ignite: ${targets.joinToString(", ")}")
 
         plugins.forEach { plugin ->
             val name = plugin.name
+
+            if (manual && name !in targets) {
+                // Not asked for: leave it exactly as it is, running or not.
+                return@forEach
+            }
             val bin = File(plugin, "system/bin")
             val fsData = File(plugin, "post-fs-data.sh")
             val sProp = File(plugin, "system.prop")
@@ -120,7 +142,10 @@ object Igniter {
                     return@forEach
                 }
 
-                pending && isIgnited(name) -> {
+                // Same rule as 1.1: a plugin ignited since boot is left alone even when it has no
+                // process (one-shot service.sh, system.prop / bin only). Only a target (manual
+                // ignite) is started again.
+                name !in targets && isIgnited(name) -> {
                     println("- $name is already ignited, skip.")
                     return@forEach
                 }
@@ -142,6 +167,30 @@ object Igniter {
     private fun markIgnited(name: String) = SystemProp.set(ignitedTag(name), "1")
 
     private fun clearIgnited(name: String) = SystemProp.set(ignitedTag(name), "0")
+
+    // ===============================
+    // BOOT TAG + STAGED PLUGINS
+    // ===============================
+    /** Not under "log.tag.ignited.": a plugin could be called "boot". */
+    private const val BOOT_TAG = "log.tag.ignite.boot"
+
+    /** An ignite already completed since boot, and no stop-all happened after it. */
+    private fun isBootIgnited(): Boolean = SystemProp.get(BOOT_TAG) == "1"
+
+    private fun markBootIgnited() = SystemProp.set(BOOT_TAG, "1")
+
+    private fun clearBootIgnited() = SystemProp.set(BOOT_TAG, "0")
+
+    /**
+     * Ids of the plugins with a staged change: plugins_update/<id>/ holding update_install,
+     * update_remove, update_enable or update_disable. Same rule as the "Ignite" label in the UI
+     * (PluginInfo.update), so an empty leftover folder does not count.
+     */
+    private fun stagedPlugins(): Set<String> =
+        PLUGINS_UPDATE_DIR.listFiles()
+            ?.filter { dir -> dir.isDirectory && !dir.list().isNullOrEmpty() }
+            ?.mapTo(HashSet()) { it.name }
+            .orEmpty()
 
     // ===============================
     // START PLUGIN (subshell + &)
@@ -318,9 +367,11 @@ object Igniter {
      * was running when it began and what descends from or joined those, never fresh services.
      */
     private fun stopAllPlugins() {
-        val running = PLUGINS_DIR.list().orEmpty().filter { servicePids(it).isNotEmpty() }
         stopProcesses("all plugins", confine = true) { allPluginPids() }
-        running.forEach { clearIgnited(it) }
+        // Every plugin goes back to "not ignited", also the ones without a process, so the next
+        // ignite starts them all again.
+        PLUGINS_DIR.list().orEmpty().forEach { clearIgnited(it) }
+        clearBootIgnited()
     }
 
     private fun stopProcesses(label: String, confine: Boolean = false, scan: () -> List<Int>) {
