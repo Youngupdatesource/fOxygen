@@ -188,7 +188,15 @@ static int switch_cgroup() {
     return -1;
 }
 
+// igniter.cpp: the plugin igniter, run as `libaxeron.so --igniter [...]`.
+int igniter_main(int argc, char **argv);
+
 int main(int argc, char *argv[]) {
+    // Not a server start: no uid check, no SELinux or cgroup switch, just the igniter.
+    if (argc > 1 && strcmp(argv[1], "--igniter") == 0) {
+        return igniter_main(argc - 1, argv + 1);
+    }
+
     signal(SIGPIPE, SIG_IGN);
 
     std::string apk_path;

@@ -88,6 +88,10 @@ open class AxeronService :
         private const val MANAGER_LOOKUP_ATTEMPTS = 4
         private const val MANAGER_LOOKUP_DELAY_MS = 750L
 
+        // How often a system service that is not up yet is looked for. At boot the server can
+        // start before them; a 1 s step added up to a second to every one of the five it waits for.
+        private const val SERVICE_POLL_MS = 100L
+
         @JvmStatic
         fun main(args: Array<String>) {
             DdmHandleAppName.setAppName("axeron_server", 0)
@@ -111,10 +115,14 @@ open class AxeronService :
         }
 
         fun waitSystemService(name: String) {
+            var logged = false
             while (ServiceManager.getService(name) == null) {
+                if (!logged) {
+                    LOGGER.i("service $name is not started, waiting.")
+                    logged = true
+                }
                 try {
-                    LOGGER.i("service $name is not started, wait 1s.")
-                    Thread.sleep(1000)
+                    Thread.sleep(SERVICE_POLL_MS)
                 } catch (it: Throwable) {
                     LOGGER.e("waitSystemService failed", it)
                 }
@@ -406,16 +414,22 @@ open class AxeronService :
         // The manager's libaxreignite.so (its native lib dir moves with every manager update),
         // and the same dex put in the bin dir at activation. Which one exists is decided when
         // the server dies, not now: after a manager update only the bin dex is left.
-        val nativeDex = getManagerApplicationInfo()?.nativeLibraryDir
+        val libDir = getManagerApplicationInfo()?.nativeLibraryDir
+        val nativeDex = libDir
             ?.let { File(it, "libaxreignite.so").absolutePath }
             .orEmpty()
         val binDex = File(
             PathHelper.getWorkingPath(isRoot, AxeronApiConstant.folder.PARENT_BINARY),
             "ax_reignite.dex"
         ).absolutePath
+        // The native igniter (an applet of libaxeron.so), preferred over the dex when the manager's lib dir still has it.
+        val nativeIgniter = libDir
+            ?.let { File(it, "libaxeron.so").absolutePath }
+            .orEmpty()
         val script = $$"""
             read -r _
             [ -f "$1" ] || exit 0
+            if [ -x "$4" ]; then exec "$4" --igniter --stop-all; fi
             if [ -f "$2" ]; then dex="$2"; elif [ -f "$3" ]; then dex="$3"; else exit 0; fi
             CLASSPATH="$dex" exec /system/bin/app_process / frb.axeron.reignite.Igniter --stop-all
         """.trimIndent()
@@ -423,7 +437,7 @@ open class AxeronService :
         try {
             deathWatchdog = ProcessBuilder(
                 "/system/bin/sh", "-c", script, "axeron_watchdog",
-                stopPluginsFlagFile.absolutePath, nativeDex, binDex
+                stopPluginsFlagFile.absolutePath, nativeDex, binDex, nativeIgniter
             )
                 .apply {
                     // The server's env (AXERONDIR, AXERONXBIN for the igniter), without a plugin
@@ -464,9 +478,23 @@ open class AxeronService :
 
         BinderSender.register(asInterface(this))
 
+        // After a restart the user waits for one thing: the manager getting its binder. It goes
+        // first. Everything else is slower and nobody is waiting for it: the guard runs ~9
+        // processes, and sendBinderToClient lists every installed package with its permissions
+        // and calls the provider of each app that asks for Shizuku's (starting the ones that
+        // are not running, with a 1 s sleep for a dead provider). That is done on its own thread,
+        // not in front of the manager's binder and not on the main looper.
         mainHandler.post {
-            sendBinderToClient()
-            sendBinderToManager()
+            sendBinderToManager(this)
+            DaemonGuard.start(MANAGER_APPLICATION_ID)
+            Thread({
+                try {
+                    shizukuService?.let { sendBinderToShizukuManager(it.asBinder()) }
+                    sendBinderToClient()
+                } catch (e: Throwable) {
+                    LOGGER.e(e, "send binder to the other apps failed")
+                }
+            }, "axeron-send-binder").apply { isDaemon = true }.start()
         }
 
         when (wakeLockMode) {
@@ -483,8 +511,6 @@ open class AxeronService :
             WakeLockMode.NEVER ->
                 LOGGER.i("wakelock mode never (default), write adaptive|always to ${wakeLockModeFile.path} to change")
         }
-
-        DaemonGuard.start(MANAGER_APPLICATION_ID)
 
         startDeathWatchdog()
     }

@@ -18,7 +18,7 @@ endif()
 find_package(cxx REQUIRED CONFIG)
 
 add_executable(libaxeron.so
-        starter.cpp misc.cpp selinux.cpp cgroup.cpp)
+        starter.cpp misc.cpp selinux.cpp cgroup.cpp igniter.cpp)
 
 target_link_libraries(libaxeron.so log cxx::cxx)
 

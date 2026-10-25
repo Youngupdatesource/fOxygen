@@ -48,8 +48,38 @@ object Igniter {
     /** Argument of the server's death watchdog: stop every plugin's processes, nothing else. */
     private const val ARG_STOP_ALL = "--stop-all"
 
+    /**
+     * Hands over to the native igniter (libaxeron.so --igniter, server/src/main/cpp/igniter.cpp)
+     * when the manager's lib dir has it, and returns its exit code. Same arguments, same stdout
+     * (it is inherited), same exit code, so whoever starts this dex (the API's igniteSuspendService,
+     * the server's watchdog) needs no change. The native one does a pass over /proc for all plugins,
+     * not one per plugin, and does not need the extra second this JVM spends starting up for it.
+     *
+     * Null when there is no native igniter or it could not be started: the Kotlin code below runs.
+     * Once it has started it is never run twice: a non-zero exit is its answer, not a reason to
+     * ignite again. AXERONLIB comes from the server's env, the lib dir of the manager the server
+     * was started from; after a manager update that dir is gone, so an old dex falls back by itself.
+     */
+    private fun delegateToNative(args: Array<String>): Int? {
+        val lib = System.getenv("AXERONLIB")?.takeIf { it.isNotBlank() } ?: return null
+        val exe = File(lib, "libaxeron.so")
+        if (!exe.canExecute()) return null
+        return try {
+            val command = ArrayList<String>(args.size + 2)
+            command.add(exe.absolutePath)
+            command.add("--igniter")
+            command.addAll(args)
+            ProcessBuilder(command).inheritIO().start().waitFor()
+        } catch (e: Exception) {
+            Log.w("Igniter", "native igniter not started, using the Kotlin one", e)
+            null
+        }
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
+        delegateToNative(args)?.let { kotlin.system.exitProcess(it) }
+
         if (args.firstOrNull() == ARG_STOP_ALL) {
             DdmHandleAppName.setAppName("axeron_plugin_stopper", 0)
             stopAllPlugins()

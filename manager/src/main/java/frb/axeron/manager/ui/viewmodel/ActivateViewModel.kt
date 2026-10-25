@@ -129,14 +129,23 @@ class ActivateViewModel : ViewModel() {
         autoRestartJob?.cancel()
     }
 
+    private fun ActivateStatus.serverPid(): Int =
+        (this as? ActivateStatus.Running)?.axeronInfo?.serverInfo?.pid ?: -1
+
     fun restartServer() {
         markIntentionalRestart()
+        // The server being replaced. Its death is not the only sign that it has been: the new
+        // one may already be up (another pid) before the manager ever saw the old one go down,
+        // and waiting for a Down that already came and went cost the whole down-timeout.
+        val oldPid = activateStatus.serverPid()
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { ServerRestart.launch() }
                 .onFailure { Log.e(TAG, "restart command failed", it) }
 
             withTimeoutOrNull(RESTART_DOWN_TIMEOUT_MS) {
-                snapshotFlow { activateStatus }.first { it !is ActivateStatus.Running }
+                snapshotFlow { activateStatus }.first {
+                    it !is ActivateStatus.Running || (oldPid > 0 && it.serverPid() != oldPid)
+                }
             }
             awaitRunning(RESTART_UP_TIMEOUT_MS)
 

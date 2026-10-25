@@ -173,12 +173,17 @@ reset_manager() {
       touch "$plugin/remove"
   done
 
-  if [ -f "${AXERONLIB}/libaxreignite.so" ]; then
-    export CLASSPATH="${AXERONLIB}/libaxreignite.so";
+  if [ -x "${AXERONLIB}/libaxeron.so" ]; then
+    # Native igniter (built into libaxeron.so); the dex below is the fallback.
+    "${AXERONLIB}/libaxeron.so" --igniter "$debug"
   else
-    export CLASSPATH="${AXERONBIN}/ax_reignite.dex";
+    if [ -f "${AXERONLIB}/libaxreignite.so" ]; then
+      export CLASSPATH="${AXERONLIB}/libaxreignite.so";
+    else
+      export CLASSPATH="${AXERONBIN}/ax_reignite.dex";
+    fi
+    app_process / frb.axeron.reignite.Igniter "$debug"
   fi
-  app_process / frb.axeron.reignite.Igniter "$debug"
 
   rm -rf "$AXERONDIR"
 
@@ -199,12 +204,17 @@ uninstall_axmanager() {
       touch "$plugin/remove"
   done
 
-  if [ -f "${AXERONLIB}/libaxreignite.so" ]; then
-    export CLASSPATH="${AXERONLIB}/libaxreignite.so";
+  if [ -x "${AXERONLIB}/libaxeron.so" ]; then
+    # Native igniter (built into libaxeron.so); the dex below is the fallback.
+    "${AXERONLIB}/libaxeron.so" --igniter "$debug"
   else
-    export CLASSPATH="${AXERONBIN}/ax_reignite.dex";
+    if [ -f "${AXERONLIB}/libaxreignite.so" ]; then
+      export CLASSPATH="${AXERONLIB}/libaxreignite.so";
+    else
+      export CLASSPATH="${AXERONBIN}/ax_reignite.dex";
+    fi
+    app_process / frb.axeron.reignite.Igniter "$debug"
   fi
-  app_process / frb.axeron.reignite.Igniter "$debug"
 
   rm -rf "$AXERONDIR"
 
