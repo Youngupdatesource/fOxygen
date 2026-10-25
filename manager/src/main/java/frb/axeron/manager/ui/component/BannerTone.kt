@@ -69,8 +69,8 @@ data class BannerTone(
     companion object {
         /** Before the banner has been looked at (and if it can't be): the theme's own look. */
         fun fallback(dark: Boolean): BannerTone =
-            if (dark) BannerTone(Color.White, Color.Black, Color.Black, 0.25f, 0.10f, 0.60f)
-            else BannerTone(DARK_TEXT, Color.White, Color.White, 0.30f, 0.12f, 0.55f)
+            if (dark) BannerTone(Color.White, Color.Black, Color.Black, 0.92f, 0.74f, 1f)
+            else BannerTone(DARK_TEXT, Color.White, Color.White, 0.92f, 0.74f, 1f)
     }
 }
 
@@ -91,10 +91,10 @@ data class BannerTone(
  *   melts into the picture instead of laying a flat white/black film over it. The two zones can
  *   have different tints; the gradient runs from one to the other. If Palette finds no swatch (an
  *   almost white or black picture) the zone's average colour is used.
- * - What also follows the picture is the text colour and how strong the fade is: the text that
- *   contrasts with the fade (dark on a light tint, white on a dark one) is used while that does
- *   not take more than [STAY_WITH_THEME] of fade; a picture that would need more gets the other
- *   text colour and only as much fade as keeps it readable.
+ * - The fade is full in both themes: (almost) opaque behind the title/version line and fully
+ *   opaque behind the uptime, a little lighter in between where there is no text. The text is
+ *   then simply the colour that contrasts with the tint (dark on a light tint, white on a dark
+ *   one). The measured contrast only raises the fade further if a picture would ever need it.
  */
 internal object BannerAnalyzer {
     private const val SAMPLE_SIDE = 256
@@ -102,20 +102,21 @@ internal object BannerAnalyzer {
     private const val ALPHA_STEP = 0.025f
     private const val TARGET_CONTRAST = 4.5f
     private const val FAIL_SHARE = 0.06f
-    private const val STAY_WITH_THEME = 0.25f
 
     // How far the banner's colour is pulled towards white (light theme) / black (dark theme).
     private const val TINT_LIGHT = 0.80f
     private const val TINT_DARK = 0.62f
 
-    // Relative luminance where white and near-black text contrast equally: above it a fade is
-    // "light" and wants dark text.
-    private const val CROSSOVER_LUM = 0.18f
+    // Relative luminance where white and the dark text contrast equally with a tint: above it the
+    // tint is "light" and wants dark text.
+    private const val CROSSOVER_LUM = 0.20f
 
-    // Fade kept at the bottom, so the card always has one. With the text of the fade's own side
-    // (white on white) it is only as strong as that text can take.
-    private const val FLOOR_BOTTOM = 0.45f
-    private const val FLOOR_BOTTOM_SAME_SIDE = 0.30f
+    // How much of the banner the fade covers. Full, in both themes: behind the title/version
+    // line, behind the uptime, and between the two as a share of the weaker of them. Lower
+    // MID_SHARE (or FULL_TOP) to let more of the picture through.
+    private const val FULL_TOP = 0.92f
+    private const val FULL_BOTTOM = 1.0f
+    private const val MID_SHARE = 0.80f
 
     // Where the text is, as fractions of the card (x0, y0, x1, y1).
     private val TOP_ZONE = floatArrayOf(0.03f, 0.05f, 0.58f, 0.38f)
@@ -203,37 +204,20 @@ internal object BannerAnalyzer {
         val bottomFade = fadeRgb(s, offX, offY, visW, visH, BOTTOM_ZONE, dark, bottom)
         val lightFade = (luminanceOf(topFade) + luminanceOf(bottomFade)) / 2f > CROSSOVER_LUM
 
-        // Text that contrasts with the fade: more fade only helps it. null = even MAX_ALPHA fails.
+        // Text that contrasts with the fade. If even MAX_ALPHA is not enough for a zone (null) it
+        // gets all the fade there is; otherwise the full fade below already covers the need.
         val naturalLum = if (lightFade) darkTextLum else 1f
         val needTop = neededAlpha(top, topFade, naturalLum)
         val needBottom = neededAlpha(bottom, bottomFade, naturalLum)
-        val natural = max(needTop ?: 1f, needBottom ?: 1f)
 
-        // Text of the fade's own side (white on a light fade): more fade only hurts it. It works
-        // when the picture already gives enough contrast, up to how much fade it can take.
-        val sameLum = if (lightFade) 1f else darkTextLum
-        val sameTop = allowedAlpha(top, topFade, sameLum)
-        val sameBottom = allowedAlpha(bottom, bottomFade, sameLum)
-        val sameWorks = sameTop != null && sameBottom != null
-
-        val useNatural = natural <= STAY_WITH_THEME || !sameWorks
-
-        val alphaTop: Float
-        val alphaBottom: Float
-        if (useNatural) {
-            alphaTop = min(MAX_ALPHA, needTop ?: 1f)
-            alphaBottom = min(MAX_ALPHA, max(needBottom ?: 1f, FLOOR_BOTTOM))
-        } else {
-            alphaTop = 0f
-            alphaBottom = min(FLOOR_BOTTOM_SAME_SIDE, sameBottom ?: 0f)
-        }
-        val darkContent = lightFade == useNatural // dark text: natural on light, same-side on dark
+        val alphaTop = min(1f, max(needTop ?: 1f, FULL_TOP))
+        val alphaBottom = min(1f, max(needBottom ?: 1f, FULL_BOTTOM))
         return BannerTone(
-            content = if (darkContent) DARK_TEXT else Color.White,
+            content = if (lightFade) DARK_TEXT else Color.White,
             scrimTop = Color(OPAQUE or topFade),
             scrimBottom = Color(OPAQUE or bottomFade),
             top = alphaTop,
-            mid = min(alphaTop, alphaBottom) * 0.6f,
+            mid = min(alphaTop, alphaBottom) * MID_SHARE,
             bottom = alphaBottom,
         )
     }
@@ -364,18 +348,6 @@ internal object BannerAnalyzer {
             a += ALPHA_STEP
         }
         return null
-    }
-
-    /** Largest fade opacity at which the text still passes, or null when it fails without any. */
-    private fun allowedAlpha(pixels: IntArray, fade: Int, textLum: Float): Float? {
-        if (!passes(pixels, fade, textLum, 0f)) return null
-        var a = 0f
-        while (a + ALPHA_STEP <= MAX_ALPHA + 1e-4f &&
-            passes(pixels, fade, textLum, a + ALPHA_STEP)
-        ) {
-            a += ALPHA_STEP
-        }
-        return a
     }
 
     /** A channel with the fade over it, blended the way the canvas does it (in sRGB). */
