@@ -7,14 +7,13 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.animation.Animator
-import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.provider.Settings
 import android.view.View
-import android.view.animation.PathInterpolator
 import androidx.core.animation.doOnEnd
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.splashscreen.SplashScreenViewProvider
+import frb.axeron.manager.ui.component.SplashIntroHost
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import android.os.Build
@@ -192,6 +191,10 @@ class AxActivity : ComponentActivity() {
 
         /** The longest the splash screen is kept waiting for the first screen. */
         private const val SPLASH_MAX_MS = 1000L
+
+        /** The intro plays once per process: not on a restart of the activity, not on reopening. */
+        @Volatile
+        private var introShown = false
     }
 
     override fun attachBaseContext(newBase: Context) {
@@ -224,14 +227,29 @@ class AxActivity : ComponentActivity() {
     @Volatile
     private var contentReady = false
 
+    /** True once the system splash is gone and the Compose intro (SplashIntroHost) may run. */
+    private var introStarted by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The intro is for a plain launch from the launcher: not for a restored activity, not for
+        // a shortcut or a zip being opened, and not when the user switched animations off.
+        val action = intent?.action
+        val animationsOn = Settings.Global.getFloat(
+            contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+        ) > 0f
+        val intro = savedInstanceState == null && !introShown && animationsOn &&
+            (action == null || action == Intent.ACTION_MAIN)
+
         // Before super.onCreate: swaps the splash theme for the app's (postSplashScreenTheme).
         installSplashScreen().apply {
             setKeepOnScreenCondition { !contentReady }
-            setOnExitAnimationListener { playSplashExit(it) }
+            setOnExitAnimationListener { hideSystemSplash(it, intro) }
         }
         // The splash must never be able to hold the user behind a screen that does not come up.
-        Handler(Looper.getMainLooper()).postDelayed({ contentReady = true }, SPLASH_MAX_MS)
+        val handler = Handler(Looper.getMainLooper())
+        handler.postDelayed({ contentReady = true }, SPLASH_MAX_MS)
+        // If the system never reports its splash gone, the intro still starts.
+        if (intro) handler.postDelayed({ introStarted = true }, SPLASH_MAX_MS + 600)
 
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -245,86 +263,29 @@ class AxActivity : ComponentActivity() {
         intentState = intent
 
         setContent {
-            AxManagerTheme {
-                MainScreen(it)
+            AxManagerTheme { settings ->
+                SplashIntroHost(
+                    enabled = intro,
+                    started = introStarted,
+                    onFinished = { introShown = true }
+                ) {
+                    MainScreen(settings)
+                }
                 LaunchedEffect(Unit) { contentReady = true }
             }
         }
     }
 
     /**
-     * Custom splash exit, same on every API level (the listener replaces the system's own exit):
-     *
-     * 1. the icon first dips a little (anticipation), then swells and fades away;
-     * 2. the splash background fades out while the icon is still leaving;
-     * 3. the app content rises in underneath: fade + a slight scale and slide from below.
-     *
-     * Emphasized-decelerate easing throughout, so it starts quickly and settles softly. Animator
-     * durations follow the system's animation scale, so "remove animations" skips it.
+     * The system splash only has to melt away. With the intro, SplashIntroHost already draws the
+     * same icon in the same place underneath (same circle, same colour), so a short fade is
+     * invisible and the intro carries on from there; without it a slightly longer fade is used.
      */
-    private fun playSplashExit(provider: SplashScreenViewProvider) {
-        val density = resources.displayMetrics.density
-        val content = findViewById<View>(android.R.id.content)
-        val icon = provider.iconView
-        val splash = provider.view
-
-        val emphasized = PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
-        val standard = PathInterpolator(0.4f, 0f, 0.2f, 1f)
-
-        // Content starts hidden and a touch lower/smaller; it is revealed as the splash leaves.
-        content.alpha = 0f
-        content.scaleX = 0.965f
-        content.scaleY = 0.965f
-        content.translationY = 24f * density
-
-        fun leave(): Animator {
-            val dip = AnimatorSet().apply {
-                playTogether(
-                    ObjectAnimator.ofFloat(icon, View.SCALE_X, 1f, 0.94f),
-                    ObjectAnimator.ofFloat(icon, View.SCALE_Y, 1f, 0.94f)
-                )
-                duration = 140
-                interpolator = standard
-            }
-            val swell = AnimatorSet().apply {
-                playTogether(
-                    ObjectAnimator.ofFloat(icon, View.SCALE_X, 0.94f, 1.28f),
-                    ObjectAnimator.ofFloat(icon, View.SCALE_Y, 0.94f, 1.28f),
-                    ObjectAnimator.ofFloat(icon, View.ALPHA, 1f, 0f)
-                )
-                duration = 340
-                interpolator = emphasized
-            }
-            return AnimatorSet().apply { playSequentially(dip, swell) }
-        }
-
-        val backdrop = ObjectAnimator.ofFloat(splash, View.ALPHA, 1f, 0f).apply {
-            startDelay = 170
-            duration = 360
-            interpolator = standard
-        }
-
-        val reveal = AnimatorSet().apply {
-            playTogether(
-                ObjectAnimator.ofFloat(content, View.ALPHA, 0f, 1f),
-                ObjectAnimator.ofFloat(content, View.SCALE_X, 0.965f, 1f),
-                ObjectAnimator.ofFloat(content, View.SCALE_Y, 0.965f, 1f),
-                ObjectAnimator.ofFloat(content, View.TRANSLATION_Y, 24f * density, 0f)
-            )
-            startDelay = 150
-            duration = 460
-            interpolator = emphasized
-        }
-
-        AnimatorSet().apply {
-            playTogether(leave(), backdrop, reveal)
-            doOnEnd {
-                content.alpha = 1f
-                content.scaleX = 1f
-                content.scaleY = 1f
-                content.translationY = 0f
-                provider.remove()
-            }
+    private fun hideSystemSplash(provider: SplashScreenViewProvider, intro: Boolean) {
+        if (intro) introStarted = true
+        ObjectAnimator.ofFloat(provider.view, View.ALPHA, 1f, 0f).apply {
+            duration = if (intro) 140L else 220L
+            doOnEnd { provider.remove() }
             start()
         }
     }
