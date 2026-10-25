@@ -36,12 +36,16 @@ import kotlin.math.pow
 private val DARK_TEXT = Color(0xFF1C1B1F)
 
 /**
- * What the status card draws over its banner so the text on it stays readable: the colour of the
- * fade behind the title/version line ([scrimTop]) and behind the uptime ([scrimBottom]) — both
- * taken from the banner itself, so the fade melts into the picture instead of laying a flat
- * white/black film over it — how opaque it is behind the title and version line ([top]), in the
- * middle where there is no text ([mid]) and behind the uptime ([bottom]), and the colour of the
- * text itself ([content]).
+ * What the status card draws over its banner so the text on it stays readable. All of it is
+ * worked out from the banner itself:
+ *
+ * - the colour of the fade behind the title/version line ([scrimTop]) and behind the uptime
+ *   ([scrimBottom]), taken from the picture so the fade melts into it;
+ * - how thick it is: opacity behind the title and version line ([top]), in the middle where there
+ *   is no text ([mid]) and behind the uptime ([bottom]);
+ * - how far it reaches: where the top fade starts to let go ([topHold], fraction of the card's
+ *   height) and where the bottom one is fully there ([bottomStart]);
+ * - the colour of the text itself ([content]).
  */
 @Immutable
 data class BannerTone(
@@ -51,16 +55,20 @@ data class BannerTone(
     val top: Float,
     val mid: Float,
     val bottom: Float,
+    val topHold: Float = 0.45f,
+    val bottomStart: Float = 0.78f,
 ) {
     /** Vertical fade: the text blocks keep their full opacity over their whole height. */
     fun brush(): Brush {
         val middle = lerp(scrimTop, scrimBottom, 0.5f)
+        val hold = topHold.coerceIn(0f, 0.9f)
+        val start = bottomStart.coerceIn(hold, 1f)
         return Brush.verticalGradient(
             colorStops = arrayOf(
                 0f to scrimTop.copy(alpha = top),
-                0.45f to scrimTop.copy(alpha = top),
-                0.62f to middle.copy(alpha = mid),
-                0.78f to scrimBottom.copy(alpha = bottom),
+                hold to scrimTop.copy(alpha = top),
+                (hold + start) / 2f to middle.copy(alpha = mid),
+                start to scrimBottom.copy(alpha = bottom),
                 1f to scrimBottom.copy(alpha = bottom),
             )
         )
@@ -69,8 +77,8 @@ data class BannerTone(
     companion object {
         /** Before the banner has been looked at (and if it can't be): the theme's own look. */
         fun fallback(dark: Boolean): BannerTone =
-            if (dark) BannerTone(Color.White, Color.Black, Color.Black, 0.92f, 0.74f, 1f)
-            else BannerTone(DARK_TEXT, Color.White, Color.White, 0.92f, 0.74f, 1f)
+            if (dark) BannerTone(Color.White, Color.Black, Color.Black, 0.25f, 0.10f, 0.60f)
+            else BannerTone(DARK_TEXT, Color.White, Color.White, 0.30f, 0.12f, 0.55f)
     }
 }
 
@@ -91,17 +99,20 @@ data class BannerTone(
  *   melts into the picture instead of laying a flat white/black film over it. The two zones can
  *   have different tints; the gradient runs from one to the other. If Palette finds no swatch (an
  *   almost white or black picture) the zone's average colour is used.
- * - The fade is full in both themes: (almost) opaque behind the title/version line and fully
- *   opaque behind the uptime, a little lighter in between where there is no text. The text is
- *   then simply the colour that contrasts with the tint (dark on a light tint, white on a dark
- *   one). The measured contrast only raises the fade further if a picture would ever need it.
+ * - Everything about the fade is decided by that measurement, nothing is fixed: how thick it is
+ *   in each zone (the least that keeps the text readable, plus a small margin, up to nearly
+ *   opaque for a bright or busy picture and hardly any for a calm one), how far it reaches
+ *   (thicker fade reaches further), and the text colour: the one that contrasts with the fade
+ *   (dark on a light tint, white on a dark one) while that does not take more than
+ *   [STAY_WITH_THEME] of fade; a picture that would need more gets the other text colour and only
+ *   as much fade as keeps it readable.
  */
 internal object BannerAnalyzer {
     private const val SAMPLE_SIDE = 256
-    private const val MAX_ALPHA = 0.80f
+    private const val MAX_ALPHA = 0.95f
     private const val ALPHA_STEP = 0.025f
     private const val TARGET_CONTRAST = 4.5f
-    private const val FAIL_SHARE = 0.06f
+    private const val FAIL_SHARE = 0.04f
 
     // How far the banner's colour is pulled towards white (light theme) / black (dark theme).
     private const val TINT_LIGHT = 0.80f
@@ -111,16 +122,26 @@ internal object BannerAnalyzer {
     // tint is "light" and wants dark text.
     private const val CROSSOVER_LUM = 0.20f
 
-    // How much of the banner the fade covers. Full, in both themes: behind the title/version
-    // line, behind the uptime, and between the two as a share of the weaker of them. Lower
-    // MID_SHARE (or FULL_TOP) to let more of the picture through.
-    private const val FULL_TOP = 0.92f
-    private const val FULL_BOTTOM = 1.0f
-    private const val MID_SHARE = 0.80f
+    // Extra opacity on top of what the measurement asks for: the picture is only sampled once (the
+    // first frame of a GIF), and a different font size or a busy edge must not tip it over.
+    private const val SAFETY = 0.05f
+
+    // A fade is never thinner than this where it is used at all, so the card always has one.
+    private const val FLOOR_TOP = 0.08f
+    private const val FLOOR_BOTTOM = 0.30f
+
+    // The text of the fade's own side (white on a white fade) is only as strong as that text can take.
+    private const val FLOOR_BOTTOM_SAME_SIDE = 0.30f
+
+    // The middle (no text) lets the picture through: this share of the weaker zone.
+    private const val MID_SHARE = 0.35f
+
+    // The text that contrasts with the fade is kept while it needs at most this much fade.
+    private const val STAY_WITH_THEME = 0.25f
 
     // Where the text is, as fractions of the card (x0, y0, x1, y1).
-    private val TOP_ZONE = floatArrayOf(0.03f, 0.05f, 0.58f, 0.38f)
-    private val BOTTOM_ZONE = floatArrayOf(0.03f, 0.80f, 0.45f, 0.96f)
+    private val TOP_ZONE = floatArrayOf(0.03f, 0.04f, 0.62f, 0.42f)
+    private val BOTTOM_ZONE = floatArrayOf(0.03f, 0.76f, 0.50f, 0.97f)
 
     private class Sample(val width: Int, val height: Int, val pixels: IntArray)
 
@@ -204,23 +225,48 @@ internal object BannerAnalyzer {
         val bottomFade = fadeRgb(s, offX, offY, visW, visH, BOTTOM_ZONE, dark, bottom)
         val lightFade = (luminanceOf(topFade) + luminanceOf(bottomFade)) / 2f > CROSSOVER_LUM
 
-        // Text that contrasts with the fade. If even MAX_ALPHA is not enough for a zone (null) it
-        // gets all the fade there is; otherwise the full fade below already covers the need.
+        // Text that contrasts with the fade: more fade only helps it. null = even MAX_ALPHA fails.
         val naturalLum = if (lightFade) darkTextLum else 1f
         val needTop = neededAlpha(top, topFade, naturalLum)
         val needBottom = neededAlpha(bottom, bottomFade, naturalLum)
+        val natural = max(needTop ?: 1f, needBottom ?: 1f)
 
-        val alphaTop = min(1f, max(needTop ?: 1f, FULL_TOP))
-        val alphaBottom = min(1f, max(needBottom ?: 1f, FULL_BOTTOM))
+        // Text of the fade's own side (white on a light fade): more fade only hurts it. It works
+        // when the picture already gives enough contrast, up to how much fade it can take.
+        val sameLum = if (lightFade) 1f else darkTextLum
+        val sameTop = allowedAlpha(top, topFade, sameLum)
+        val sameBottom = allowedAlpha(bottom, bottomFade, sameLum)
+        val sameWorks = sameTop != null && sameBottom != null
+
+        val useNatural = natural <= STAY_WITH_THEME || !sameWorks
+
+        val alphaTop: Float
+        val alphaBottom: Float
+        if (useNatural) {
+            // The least that reads, plus the margin; "can't be read at all" gets everything.
+            alphaTop = thick(needTop, FLOOR_TOP)
+            alphaBottom = thick(needBottom, FLOOR_BOTTOM)
+        } else {
+            alphaTop = 0f
+            alphaBottom = min(FLOOR_BOTTOM_SAME_SIDE, sameBottom ?: 0f)
+        }
+        val darkContent = lightFade == useNatural // dark text: natural on light, same-side on dark
         return BannerTone(
-            content = if (lightFade) DARK_TEXT else Color.White,
+            content = if (darkContent) DARK_TEXT else Color.White,
             scrimTop = Color(OPAQUE or topFade),
             scrimBottom = Color(OPAQUE or bottomFade),
             top = alphaTop,
             mid = min(alphaTop, alphaBottom) * MID_SHARE,
             bottom = alphaBottom,
+            // A thicker fade also reaches further into the picture.
+            topHold = 0.40f + 0.12f * alphaTop,
+            bottomStart = 0.78f - 0.14f * alphaBottom,
         )
     }
+
+    /** Opacity for a zone from what it needs: needed + [SAFETY], at least [floor], null = all. */
+    private fun thick(need: Float?, floor: Float): Float =
+        if (need == null) MAX_ALPHA else min(MAX_ALPHA, max(floor, need + SAFETY))
 
     private val OPAQUE = 0xFF000000.toInt()
 
@@ -350,6 +396,18 @@ internal object BannerAnalyzer {
         return null
     }
 
+    /** Largest fade opacity at which the text still passes, or null when it fails without any. */
+    private fun allowedAlpha(pixels: IntArray, fade: Int, textLum: Float): Float? {
+        if (!passes(pixels, fade, textLum, 0f)) return null
+        var a = 0f
+        while (a + ALPHA_STEP <= MAX_ALPHA + 1e-4f &&
+            passes(pixels, fade, textLum, a + ALPHA_STEP)
+        ) {
+            a += ALPHA_STEP
+        }
+        return a
+    }
+
     /** A channel with the fade over it, blended the way the canvas does it (in sRGB). */
     private fun mix(channel: Int, fade: Int, alpha: Float): Int =
         (channel + (fade - channel) * alpha + 0.5f).toInt().coerceIn(0, 255)
@@ -407,5 +465,7 @@ fun rememberBannerTone(file: File?): BannerTone {
     val top by animateFloatAsState(target.top, floatSpec, label = "bannerTop")
     val mid by animateFloatAsState(target.mid, floatSpec, label = "bannerMid")
     val bottom by animateFloatAsState(target.bottom, floatSpec, label = "bannerBottom")
-    return BannerTone(content, scrimTop, scrimBottom, top, mid, bottom)
+    val topHold by animateFloatAsState(target.topHold, floatSpec, label = "bannerTopHold")
+    val bottomStart by animateFloatAsState(target.bottomStart, floatSpec, label = "bannerBottomStart")
+    return BannerTone(content, scrimTop, scrimBottom, top, mid, bottom, topHold, bottomStart)
 }
