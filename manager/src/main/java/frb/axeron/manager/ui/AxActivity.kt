@@ -7,7 +7,14 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.animation.Animator
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.view.View
+import android.view.animation.PathInterpolator
+import androidx.core.animation.doOnEnd
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.splashscreen.SplashScreenViewProvider
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import android.os.Build
@@ -219,7 +226,10 @@ class AxActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Before super.onCreate: swaps the splash theme for the app's (postSplashScreenTheme).
-        installSplashScreen().setKeepOnScreenCondition { !contentReady }
+        installSplashScreen().apply {
+            setKeepOnScreenCondition { !contentReady }
+            setOnExitAnimationListener { playSplashExit(it) }
+        }
         // The splash must never be able to hold the user behind a screen that does not come up.
         Handler(Looper.getMainLooper()).postDelayed({ contentReady = true }, SPLASH_MAX_MS)
 
@@ -239,6 +249,88 @@ class AxActivity : ComponentActivity() {
                 MainScreen(it)
                 LaunchedEffect(Unit) { contentReady = true }
             }
+        }
+    }
+
+    /**
+     * Custom splash exit, same on every API level (the listener replaces the system's own exit):
+     *
+     * 1. the icon first dips a little (anticipation), then swells and fades away;
+     * 2. the splash background fades out while the icon is still leaving;
+     * 3. the app content rises in underneath: fade + a slight scale and slide from below.
+     *
+     * Emphasized-decelerate easing throughout, so it starts quickly and settles softly. Animator
+     * durations follow the system's animation scale, so "remove animations" skips it.
+     */
+    private fun playSplashExit(provider: SplashScreenViewProvider) {
+        val density = resources.displayMetrics.density
+        val content = findViewById<View>(android.R.id.content)
+        val icon = provider.iconView
+        val splash = provider.view
+
+        val emphasized = PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
+        val standard = PathInterpolator(0.4f, 0f, 0.2f, 1f)
+
+        // Content starts hidden and a touch lower/smaller; it is revealed as the splash leaves.
+        content.alpha = 0f
+        content.scaleX = 0.965f
+        content.scaleY = 0.965f
+        content.translationY = 24f * density
+
+        fun leave(): Animator {
+            val dip = AnimatorSet().apply {
+                playTogether(
+                    ObjectAnimator.ofFloat(icon, View.SCALE_X, 1f, 0.94f),
+                    ObjectAnimator.ofFloat(icon, View.SCALE_Y, 1f, 0.94f)
+                )
+                duration = 140
+                interpolator = standard
+            }
+            val swell = AnimatorSet().apply {
+                playTogether(
+                    ObjectAnimator.ofFloat(icon, View.SCALE_X, 0.94f, 1.28f),
+                    ObjectAnimator.ofFloat(icon, View.SCALE_Y, 0.94f, 1.28f),
+                    ObjectAnimator.ofFloat(icon, View.ALPHA, 1f, 0f)
+                )
+                duration = 340
+                interpolator = emphasized
+            }
+            return AnimatorSet().apply { playSequentially(dip, swell) }
+        }
+
+        val backdrop = ObjectAnimator.ofFloat(splash, View.ALPHA, 1f, 0f).apply {
+            startDelay = 170
+            duration = 360
+            interpolator = standard
+        }
+
+        val reveal = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(content, View.ALPHA, 0f, 1f),
+                ObjectAnimator.ofFloat(content, View.SCALE_X, 0.965f, 1f),
+                ObjectAnimator.ofFloat(content, View.SCALE_Y, 0.965f, 1f),
+                ObjectAnimator.ofFloat(content, View.TRANSLATION_Y, 24f * density, 0f)
+            )
+            startDelay = 150
+            duration = 460
+            interpolator = emphasized
+        }
+
+        // A splash icon that is itself still animating (Android 12+) gets to finish first.
+        val wait = (provider.iconAnimationStartMs + provider.iconAnimationDurationMs -
+            System.currentTimeMillis()).coerceIn(0L, 600L)
+
+        AnimatorSet().apply {
+            playTogether(leave(), backdrop, reveal)
+            startDelay = wait
+            doOnEnd {
+                content.alpha = 1f
+                content.scaleX = 1f
+                content.scaleY = 1f
+                content.translationY = 0f
+                provider.remove()
+            }
+            start()
         }
     }
 

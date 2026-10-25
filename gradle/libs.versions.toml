@@ -36,6 +36,7 @@ lifecycleLivedataCoreKtx = "2.10.0"
 uiautomator = "2.3.0"
 profileinstaller = "1.4.1"
 coreSplashscreen = "1.0.1"
+palette = "1.0.0"
 libsu = "6.0.0"
 appcompat = "1.7.1"
 junit = "4.13.2"
@@ -94,6 +95,7 @@ markdown = { group = "io.noties.markwon", name = "core", version.ref = "markdown
 androidx-annotation-jvm = { group = "androidx.annotation", name = "annotation-jvm", version.ref = "annotationJvm" }
 androidx-lifecycle-livedata-core-ktx = { group = "androidx.lifecycle", name = "lifecycle-livedata-core-ktx", version.ref = "lifecycleLivedataCoreKtx" }
 androidx-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+androidx-palette = { group = "androidx.palette", name = "palette", version.ref = "palette" }
 androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
 androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
