@@ -81,6 +81,11 @@ dependencies {
 
     implementation(libs.androidx.webkit)
     implementation(libs.androidx.core.ktx)
+    // Splash screen on every API level, with the theme swap after it (Theme.AxManager.Starting).
+    implementation(libs.androidx.core.splashscreen)
+    // Installs the baseline profiles the AndroidX libraries (Compose among them) ship, so their
+    // code is compiled ahead of time instead of being interpreted on the first launches.
+    implementation(libs.androidx.profileinstaller)
 
     implementation(libs.rikka.compatibility)
     implementation(libs.rikka.parcelablelist)

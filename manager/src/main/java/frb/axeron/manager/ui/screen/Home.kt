@@ -19,7 +19,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -104,6 +104,7 @@ import frb.axeron.manager.R
 import frb.axeron.manager.ui.component.ExtraLabel
 import frb.axeron.manager.ui.component.STATUS_BANNER_ASPECT
 import frb.axeron.manager.ui.component.StatusBannerImage
+import frb.axeron.manager.ui.component.rememberBannerTone
 import frb.axeron.manager.ui.component.rememberStatusBannerFile
 import frb.axeron.manager.ui.component.ExtraLabelDefaults
 import frb.axeron.manager.ui.component.PluginCard
@@ -425,11 +426,18 @@ fun StatusCard(
                     onClick(isRunning)
                 }
         ) {
-            val isDark = isSystemInDarkTheme()
             val colorScheme = MaterialTheme.colorScheme
-            val fadeColor = when {
-                isDark -> colorScheme.surfaceVariant
-                else -> colorScheme.surfaceVariant
+            // The theme in use, not the system's: the app can force light or dark by itself
+            // (Theme.kt), and then isSystemInDarkTheme() says the opposite of what is on screen.
+            val isDark = colorScheme.background.luminance() < 0.5f
+            val fadeColor = if (isDark) colorScheme.surfaceVariant else Color.White
+            val fadeBrush = remember(fadeColor) {
+                Brush.verticalGradient(
+                    colors = listOf(
+                        fadeColor.copy(alpha = 0.0f),
+                        fadeColor.copy(alpha = 0.55f)
+                    )
+                )
             }
 
             when {
@@ -449,16 +457,7 @@ fun StatusCard(
                     Box(
                         modifier = Modifier
                             .matchParentSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        fadeColor.copy(alpha = 0.0f),
-                                        fadeColor.copy(alpha = 0.55f)
-                                    ),
-                                    startY = 0f,
-                                    endY = Float.POSITIVE_INFINITY
-                                )
-                            )
+                            .background(fadeBrush)
                     )
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -493,16 +492,7 @@ fun StatusCard(
                     Box(
                         modifier = Modifier
                             .matchParentSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        fadeColor.copy(alpha = 0.0f),
-                                        fadeColor.copy(alpha = 0.55f)
-                                    ),
-                                    startY = 0f,
-                                    endY = Float.POSITIVE_INFINITY
-                                )
-                            )
+                            .background(fadeBrush)
                     )
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -522,6 +512,11 @@ fun StatusCard(
 
                 isRunning -> {
                     val bannerFile = rememberStatusBannerFile()
+                    // Fade and text colour follow the part of the banner that is on screen and the
+                    // theme: white fade with dark text in light, black with white in dark, flipped
+                    // only when the picture needs it. Without a banner it is not used.
+                    val tone = rememberBannerTone(bannerFile)
+                    val toneBrush = remember(tone) { tone.brush() }
 
                     if (bannerFile != null) {
                         // Penentu tinggi kartu: tanpa ikon 145dp, banner (matchParentSize) tidak punya ukuran sendiri.
@@ -533,18 +528,6 @@ fun StatusCard(
                         StatusBannerImage(
                             file = bannerFile,
                             modifier = Modifier.matchParentSize()
-                        )
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colorStops = arrayOf(
-                                            0.5f to Color.Transparent,
-                                            1f to Color.Black.copy(alpha = 0.6f)
-                                        )
-                                    )
-                                )
                         )
                     } else {
                         Box(
@@ -563,30 +546,11 @@ fun StatusCard(
                     Box(
                         modifier = Modifier
                             .matchParentSize()
-                            .background(
-                                if (bannerFile != null) {
-                                    // Scrim lebih gelap agar teks tetap terbaca di atas gambar/GIF apa pun.
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.Black.copy(alpha = 0.25f),
-                                            Color.Black.copy(alpha = 0.65f)
-                                        )
-                                    )
-                                } else {
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            fadeColor.copy(alpha = 0.0f),
-                                            fadeColor.copy(alpha = 0.55f)
-                                        ),
-                                        startY = 0f,
-                                        endY = Float.POSITIVE_INFINITY
-                                    )
-                                }
-                            )
+                            .background(if (bannerFile != null) toneBrush else fadeBrush)
                     )
                     CompositionLocalProvider(
                         LocalContentColor provides
-                                if (bannerFile != null) Color.White else LocalContentColor.current
+                                if (bannerFile != null) tone.content else LocalContentColor.current
                     ) {
                     Column(
                         modifier = Modifier
@@ -650,7 +614,7 @@ fun StatusCard(
                         Text(
                             text = formatUptime(time),
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (bannerFile != null) Color.White.copy(alpha = 0.85f)
+                            color = if (bannerFile != null) tone.content.copy(alpha = 0.85f)
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontFamily = FontFamily.Monospace
                         )
@@ -675,16 +639,7 @@ fun StatusCard(
                     Box(
                         modifier = Modifier
                             .matchParentSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        fadeColor.copy(alpha = 0.0f),
-                                        fadeColor.copy(alpha = 0.55f)
-                                    ),
-                                    startY = 0f,
-                                    endY = Float.POSITIVE_INFINITY
-                                )
-                            )
+                            .background(fadeBrush)
                     )
                     Column(
                         modifier = Modifier.padding(16.dp),

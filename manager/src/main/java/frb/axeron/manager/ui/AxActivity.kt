@@ -5,6 +5,11 @@ package frb.axeron.manager.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -177,6 +182,9 @@ class AxActivity : ComponentActivity() {
 
     companion object {
         const val OPEN_QUICK_SHELL = "AxManager.QUICK_SHELL"
+
+        /** The longest the splash screen is kept waiting for the first screen. */
+        private const val SPLASH_MAX_MS = 1000L
     }
 
     override fun attachBaseContext(newBase: Context) {
@@ -202,17 +210,34 @@ class AxActivity : ComponentActivity() {
 
     private var intentState: Intent? by mutableStateOf(null)
 
+    /**
+     * Turns true once the first screen has been composed. Until then the splash screen stays up,
+     * so the app opens onto its content instead of a blank frame.
+     */
+    @Volatile
+    private var contentReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Before super.onCreate: swaps the splash theme for the app's (postSplashScreenTheme).
+        installSplashScreen().setKeepOnScreenCondition { !contentReady }
+        // The splash must never be able to hold the user behind a screen that does not come up.
+        Handler(Looper.getMainLooper()).postDelayed({ contentReady = true }, SPLASH_MAX_MS)
+
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        ShortcutManagerCompat.pushDynamicShortcut(this@AxActivity, shortcut)
+        // The shortcut survives restarts. Pushing it is a blocking call to the system's shortcut
+        // service, and building it touches resources: neither belongs in front of the first frame.
+        lifecycleScope.launch(Dispatchers.Default) {
+            runCatching { ShortcutManagerCompat.pushDynamicShortcut(applicationContext, shortcut) }
+        }
 
         intentState = intent
 
         setContent {
             AxManagerTheme {
                 MainScreen(it)
+                LaunchedEffect(Unit) { contentReady = true }
             }
         }
     }

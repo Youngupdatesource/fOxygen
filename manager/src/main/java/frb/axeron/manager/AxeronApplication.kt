@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Build
 import coil.Coil
 import coil.ImageLoader
+import coil.ImageLoaderFactory
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.memory.MemoryCache
@@ -22,7 +23,7 @@ import org.lsposed.hiddenapibypass.HiddenApiBypass
 import java.io.File
 import java.util.Locale
 
-class AxeronApplication : Engine() {
+class AxeronApplication : Engine(), ImageLoaderFactory {
     companion object {
         private const val ICON_MEMORY_CACHE_BYTES = 16 * 1024 * 1024
 
@@ -38,9 +39,9 @@ class AxeronApplication : Engine() {
             if (Build.VERSION.SDK_INT >= 28) {
                 HiddenApiBypass.setHiddenApiExemptions("")
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                System.loadLibrary("adb")
-            }
+            // libadb is not loaded here: AdbPairingClient loads it itself, the first time pairing
+            // is used. Loading it at process start cost a dlopen on the main thread of every
+            // cold start, for a library most launches never touch.
         }
     }
 
@@ -50,30 +51,35 @@ class AxeronApplication : Engine() {
         AxeronSettings.initialize(axeronApp)
     }
 
-    @SuppressLint("ResourceType")
-    override fun onCreate() {
-        super.onCreate()
+    @Volatile
+    private var imageLoaderCreated = false
 
+    /**
+     * Coil asks for its loader the first time an image is requested, not at process start: building
+     * it (decoders, memory cache, the icon fetcher) is work a cold start does not need before the
+     * first frame.
+     */
+    @SuppressLint("ResourceType")
+    override fun newImageLoader(): ImageLoader {
+        imageLoaderCreated = true
         val context = this
         val iconSize = resources.getDimensionPixelSize(android.R.dimen.app_icon_size)
-        Coil.setImageLoader(
-            ImageLoader.Builder(context)
-                .components {
-                    add(AppIconKeyer())
-                    add(ThrottledAppIconFetcher.Factory(iconSize, context))
-                    // ImageDecoder (API 28+) mendekode frame GIF/WebP animasi langsung di ukuran target
-                    // dan hemat memori; GifDecoder hanya untuk API 26-27.
-                    if (Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory())
-                    else add(GifDecoder.Factory())
-                }
-                .memoryCache {
-                    MemoryCache.Builder(context)
-                        .maxSizeBytes(ICON_MEMORY_CACHE_BYTES)
-                        .build()
-                }
-                .diskCache(null)
-                .build()
-        )
+        return ImageLoader.Builder(context)
+            .components {
+                add(AppIconKeyer())
+                add(ThrottledAppIconFetcher.Factory(iconSize, context))
+                // ImageDecoder (API 28+) mendekode frame GIF/WebP animasi langsung di ukuran target
+                // dan hemat memori; GifDecoder hanya untuk API 26-27.
+                if (Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory())
+                else add(GifDecoder.Factory())
+            }
+            .memoryCache {
+                MemoryCache.Builder(context)
+                    .maxSizeBytes(ICON_MEMORY_CACHE_BYTES)
+                    .build()
+            }
+            .diskCache(null)
+            .build()
     }
 
     val okhttpClient: OkHttpClient by lazy {
@@ -89,7 +95,8 @@ class AxeronApplication : Engine() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+        // Not created yet: nothing to clear (and asking for it here would create it).
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN && imageLoaderCreated) {
             Coil.imageLoader(this).memoryCache?.clear()
         }
     }

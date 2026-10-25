@@ -5,6 +5,13 @@
         <item name="colorPrimary">@color/orange</item>
     </style>
 
+    <!-- Shown while AxActivity starts; postSplashScreenTheme swaps it for Theme.AxManager. -->
+    <style name="Theme.AxManager.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.AxManager</item>
+    </style>
+
     <style name="Theme.AxManager.WebUI" parent="Theme.AxManager">
         <item name="android:windowLightStatusBar">true</item>
     </style>
