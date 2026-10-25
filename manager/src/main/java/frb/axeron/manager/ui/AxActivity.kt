@@ -316,13 +316,8 @@ class AxActivity : ComponentActivity() {
             interpolator = emphasized
         }
 
-        // A splash icon that is itself still animating (Android 12+) gets to finish first.
-        val wait = (provider.iconAnimationStartMs + provider.iconAnimationDurationMs -
-            System.currentTimeMillis()).coerceIn(0L, 600L)
-
         AnimatorSet().apply {
             playTogether(leave(), backdrop, reveal)
-            startDelay = wait
             doOnEnd {
                 content.alpha = 1f
                 content.scaleX = 1f
