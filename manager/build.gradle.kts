@@ -83,6 +83,8 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     // Splash screen on every API level, with the theme swap after it (Theme.AxManager.Starting).
     implementation(libs.androidx.core.splashscreen)
+    // Dominant colour of the status banner, so its fade takes the banner's own tint.
+    implementation(libs.androidx.palette)
     // Installs the baseline profiles the AndroidX libraries (Compose among them) ship, so their
     // code is compiled ahead of time instead of being interpreted on the first launches.
     implementation(libs.androidx.profileinstaller)
