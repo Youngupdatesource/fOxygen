@@ -60,7 +60,7 @@ data class BannerTone(
         /** Before the banner has been looked at (and if it can't be): the theme's own look. */
         fun fallback(dark: Boolean): BannerTone =
             if (dark) BannerTone(Color.White, Color.Black, 0.25f, 0.10f, 0.60f)
-            else BannerTone(DARK_TEXT, Color.White, 0.90f, 0.68f, 1f)
+            else BannerTone(DARK_TEXT, Color.White, 0f, 0f, 0f) // light: no fade
     }
 }
 
@@ -89,16 +89,6 @@ internal object BannerAnalyzer {
     private const val TARGET_CONTRAST = 4.5f
     private const val FAIL_SHARE = 0.06f
     private const val STAY_WITH_THEME = 0.25f
-
-    // Light theme: the white fade covers the banner fully (the limit is the whole banner), with the
-    // dark text on it always. Dark theme is the original default (about half) and is untouched.
-    // These are floors: a picture that needs more gets more, up to the cap.
-    private const val LIGHT_TOP = 0.90f
-    private const val LIGHT_BOTTOM = 1.0f
-    private const val LIGHT_CAP = 1.0f
-
-    // Between the two text blocks the light fade is this share of the weaker one (dark: 0.6).
-    private const val LIGHT_MID_SHARE = 0.75f
 
     // Fade kept at the bottom, so the card always has one. With the text of the fade's own side
     // (white on white) it is only as strong as that text can take.
@@ -186,6 +176,21 @@ internal object BannerAnalyzer {
 
         val darkTextLum = luminance(0x1C, 0x1B, 0x1F)
 
+        // Light theme: no fade at all, the banner is shown as it is. The only thing that follows
+        // the picture is the text colour: whichever of the dark text and white fails the contrast
+        // over fewer of the pixels behind the text (dark on a tie).
+        if (!dark) {
+            val failDark = failShare(top, darkTextLum) + failShare(bottom, darkTextLum)
+            val failWhite = failShare(top, 1f) + failShare(bottom, 1f)
+            return BannerTone(
+                content = if (failWhite < failDark) Color.White else DARK_TEXT,
+                scrim = Color.White,
+                top = 0f,
+                mid = 0f,
+                bottom = 0f,
+            )
+        }
+
         // The fade's colour is the theme's, always.
         val whiteFade = !dark
 
@@ -202,16 +207,11 @@ internal object BannerAnalyzer {
         val sameBottom = allowedAlpha(bottom, whiteFade, sameLum)
         val sameWorks = sameTop != null && sameBottom != null
 
-        // Light: always the white fade with dark text. Dark: as before, flipped only when the
-        // picture needs it.
-        val useNatural = whiteFade || natural <= STAY_WITH_THEME || !sameWorks
+        val useNatural = natural <= STAY_WITH_THEME || !sameWorks
 
         val alphaTop: Float
         val alphaBottom: Float
-        if (whiteFade) {
-            alphaTop = min(LIGHT_CAP, max(needTop ?: 1f, LIGHT_TOP))
-            alphaBottom = min(LIGHT_CAP, max(needBottom ?: 1f, LIGHT_BOTTOM))
-        } else if (useNatural) {
+        if (useNatural) {
             alphaTop = min(MAX_ALPHA, needTop ?: 1f)
             alphaBottom = min(MAX_ALPHA, max(needBottom ?: 1f, FLOOR_BOTTOM))
         } else {
@@ -223,7 +223,7 @@ internal object BannerAnalyzer {
             content = if (darkContent) DARK_TEXT else Color.White,
             scrim = if (whiteFade) Color.White else Color.Black,
             top = alphaTop,
-            mid = min(alphaTop, alphaBottom) * (if (whiteFade) LIGHT_MID_SHARE else 0.6f),
+            mid = min(alphaTop, alphaBottom) * 0.6f,
             bottom = alphaBottom,
         )
     }
@@ -271,6 +271,17 @@ internal object BannerAnalyzer {
             y += stepY
         }
         return out.toIntArray()
+    }
+
+    /** Share (0..1) of the pixels over which text of this luminance misses [TARGET_CONTRAST]. */
+    private fun failShare(pixels: IntArray, textLum: Float): Float {
+        if (pixels.isEmpty()) return 0f
+        var bad = 0
+        for (p in pixels) {
+            val l = luminance((p shr 16) and 0xFF, (p shr 8) and 0xFF, p and 0xFF)
+            if (contrast(l, textLum) < TARGET_CONTRAST) bad++
+        }
+        return bad / pixels.size.toFloat()
     }
 
     /** Does the text keep [TARGET_CONTRAST] over all but [FAIL_SHARE] of the pixels at this fade? */
