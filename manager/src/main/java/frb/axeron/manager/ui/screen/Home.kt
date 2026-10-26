@@ -551,11 +551,13 @@ fun StatusCard(
                             )
                         }
                     }
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .background(if (bannerFile != null) toneBrush else fadeBrush)
-                    )
+                    if (bannerFile == null || isDark) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(if (bannerFile != null) toneBrush else fadeBrush)
+                        )
+                    }
                     CompositionLocalProvider(
                         LocalContentColor provides
                                 if (bannerFile != null) tone.content else LocalContentColor.current
