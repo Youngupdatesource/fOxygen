@@ -278,8 +278,12 @@ fun HomeScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGloba
                 }
             }
 
-            Box(Modifier.riseIn(2)) { UpdateCard() }
-            Box(Modifier.riseIn(3)) { InfoCard(activateViewModel) }
+            Box(Modifier.riseIn(2)) {
+                Column {
+                    UpdateCard()
+                    InfoCard(activateViewModel)
+                }
+            }
 
             Box(Modifier.riseIn(4)) { IssueReportCard() }
             Box(Modifier.riseIn(5)) { SupportCard() }
@@ -697,19 +701,21 @@ fun UpdateCard() {
         exit = shrinkVertically() + fadeOut()
     ) {
         val updateDialog = rememberConfirmDialog(onConfirm = { uriHandler.openUri(newVersionUrl) })
-        WarningCard(
-            message = newVersionAvailable.format(newVersionCode),
-            MaterialTheme.colorScheme.outlineVariant
-        ) {
-            if (changelog.isEmpty()) {
-                uriHandler.openUri(newVersionUrl)
-            } else {
-                updateDialog.showConfirm(
-                    title = title,
-                    content = changelog,
-                    markdown = true,
-                    confirm = updateText
-                )
+        Box(Modifier.padding(bottom = 16.dp)) {
+            WarningCard(
+                message = newVersionAvailable.format(newVersionCode),
+                MaterialTheme.colorScheme.outlineVariant
+            ) {
+                if (changelog.isEmpty()) {
+                    uriHandler.openUri(newVersionUrl)
+                } else {
+                    updateDialog.showConfirm(
+                        title = title,
+                        content = changelog,
+                        markdown = true,
+                        confirm = updateText
+                    )
+                }
             }
         }
     }
