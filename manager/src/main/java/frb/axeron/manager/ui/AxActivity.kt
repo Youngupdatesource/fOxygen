@@ -14,6 +14,7 @@ import androidx.core.animation.doOnEnd
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.splashscreen.SplashScreenViewProvider
 import frb.axeron.manager.ui.component.SplashIntroHost
+import frb.axeron.manager.ui.component.riseIn
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import android.os.Build
@@ -563,7 +564,10 @@ class AxActivity : ComponentActivity() {
                 visible = showBottomBar && !imeVisible,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter)
+                // First thing up on the start-up entrance: the capsule rises from the bottom edge.
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .riseIn(index = 0, distance = 96.dp)
             ) {
                 BottomBar(
                     navController,

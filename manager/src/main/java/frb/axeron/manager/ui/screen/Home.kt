@@ -106,6 +106,7 @@ import frb.axeron.manager.ui.component.STATUS_BANNER_ASPECT
 import frb.axeron.manager.ui.component.StatusBannerImage
 import frb.axeron.manager.ui.component.rememberBannerTone
 import frb.axeron.manager.ui.component.rememberStatusBannerFile
+import frb.axeron.manager.ui.component.riseIn
 import frb.axeron.manager.ui.component.ExtraLabelDefaults
 import frb.axeron.manager.ui.component.PluginCard
 import frb.axeron.manager.ui.component.PowerDialog
@@ -224,7 +225,9 @@ fun HomeScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGloba
         floatingActionButton = {
             AnimatedVisibility(
                 visible = isRunning,
-                modifier = Modifier.padding(bottom = LocalCapsuleInset.current)
+                modifier = Modifier
+                    .padding(bottom = LocalCapsuleInset.current)
+                    .riseIn(index = 5, distance = 32.dp)
             ) {
                 FloatingActionButton(
                     onClick = {
@@ -246,14 +249,19 @@ fun HomeScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGloba
                 .padding(bottom = LocalCapsuleInset.current + 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            StatusCard(
-                activateViewModel = activateViewModel
-            ) {
-                if (!it) {
-                    navigator.navigate(ActivateScreenDestination)
+            // Each child rises in on the start-up entrance (riseIn). The cards are wrapped in a Box:
+            // a Box around exactly one child changes nothing in the layout, the spacing included.
+            Box(Modifier.riseIn(0)) {
+                StatusCard(
+                    activateViewModel = activateViewModel
+                ) {
+                    if (!it) {
+                        navigator.navigate(ActivateScreenDestination)
+                    }
                 }
             }
-            AnimatedVisibility(visible = isRunning) {
+            // Not in a Box: it has to stay a child of the Column for its own expand/shrink.
+            AnimatedVisibility(visible = isRunning, modifier = Modifier.riseIn(1)) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -270,12 +278,12 @@ fun HomeScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGloba
                 }
             }
 
-            UpdateCard()
-            InfoCard(activateViewModel)
+            Box(Modifier.riseIn(2)) { UpdateCard() }
+            Box(Modifier.riseIn(3)) { InfoCard(activateViewModel) }
 
-            IssueReportCard()
-            SupportCard()
-            LearnCard()
+            Box(Modifier.riseIn(4)) { IssueReportCard() }
+            Box(Modifier.riseIn(5)) { SupportCard() }
+            Box(Modifier.riseIn(6)) { LearnCard() }
         }
     }
 }

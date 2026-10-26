@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,7 +55,10 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import frb.axeron.manager.R
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.PI
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -112,6 +116,20 @@ fun SplashIntroHost(
             active = false
             onFinished()
         }
+    }
+
+    // The cue for the first screen (StartupMotion): it starts to rise in when the iris starts to
+    // open, so what the iris uncovers is already coming up. With no intro, a moment after the
+    // system splash has faded. The timeout is a safety net: it must never stay hidden.
+    LaunchedEffect(Unit) {
+        if (enabled) {
+            withTimeoutOrNull(5000L) { snapshotFlow { clock.value }.first { it >= EXIT_AT } }
+        } else {
+            delay(150L)
+        }
+        StartupMotion.revealed = true
+        delay(2500L)
+        StartupMotion.played = true
     }
 
     Box(Modifier.fillMaxSize()) {
