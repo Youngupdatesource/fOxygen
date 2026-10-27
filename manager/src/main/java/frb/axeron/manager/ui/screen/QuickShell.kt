@@ -176,7 +176,6 @@ fun QuickShellScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewMode
     val snackBarHost = LocalSnackbarHost.current
 
     var showExtraDialog by remember { mutableStateOf(false) }
-    var showTextViewer by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
 
     // Nothing left to search once the output is cleared.
@@ -339,11 +338,8 @@ fun QuickShellScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewMode
                 ),
                 jumpButtonPadding = PaddingValues(bottom = jumpButtonBottom),
                 jumpButtonAlignWithFab = true,
-                textViewerOpen = showTextViewer,
-                onTextViewerDismiss = { showTextViewer = false },
                 searchOpen = showSearch,
                 onSearchOpenChange = { showSearch = it },
-                onTextViewerOpen = { showTextViewer = true },
                 modifier = Modifier.fillMaxSize()
             )
 

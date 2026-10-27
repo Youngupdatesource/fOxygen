@@ -274,9 +274,8 @@
     <string name="settings_editor_overview">Ikhtisar</string>
     <string name="settings_editor_overview_desc">Jumlah entri per sumber. Ketuk salah satu untuk membukanya.</string>
     <string name="settings_editor_entries">%1$d entri</string>
-    <string name="terminal_select_text">Pilih teks</string>
-    <string name="terminal_select_text_hint">Tekan lama untuk memilih. Pilih semua menyalin seluruh output.</string>
-    <string name="terminal_select_text_truncated">Menampilkan %1$d baris terakhir</string>
+    <string name="terminal_select_all">Pilih semua</string>
+    <string name="terminal_copy_truncated">Disalin %d karakter pertama</string>
     <string name="terminal_search">Cari di output</string>
     <string name="terminal_search_hint">Cari di output</string>
     <string name="terminal_search_previous">Hasil sebelumnya</string>

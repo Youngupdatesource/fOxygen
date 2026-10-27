@@ -274,9 +274,8 @@
     <string name="settings_editor_overview">Overview</string>
     <string name="settings_editor_overview_desc">Entries per source. Tap one to open it.</string>
     <string name="settings_editor_entries">%1$d entries</string>
-    <string name="terminal_select_text">Select text</string>
-    <string name="terminal_select_text_hint">Long-press to select. Select all copies everything.</string>
-    <string name="terminal_select_text_truncated">Showing the last %1$d lines</string>
+    <string name="terminal_select_all">Select all</string>
+    <string name="terminal_copy_truncated">Copied the first %d characters</string>
     <string name="terminal_search">Search output</string>
     <string name="terminal_search_hint">Find in output</string>
     <string name="terminal_search_previous">Previous match</string>

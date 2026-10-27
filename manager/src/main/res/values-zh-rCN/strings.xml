@@ -253,9 +253,8 @@
     <string name="settings_editor_overview">概览</string>
     <string name="settings_editor_overview_desc">各来源的条目数。点按即可打开。</string>
     <string name="settings_editor_entries">%1$d 个条目</string>
-    <string name="terminal_select_text">选择文本</string>
-    <string name="terminal_select_text_hint">长按选择，全选将复制全部输出。</string>
-    <string name="terminal_select_text_truncated">显示最后 %1$d 行</string>
+    <string name="terminal_select_all">全选</string>
+    <string name="terminal_copy_truncated">已复制前 %d 个字符</string>
     <string name="terminal_search">搜索输出</string>
     <string name="terminal_search_hint">在输出中查找</string>
     <string name="terminal_search_previous">上一个匹配</string>
