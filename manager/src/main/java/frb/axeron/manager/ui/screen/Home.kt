@@ -528,7 +528,6 @@ fun StatusCard(
                     // theme: white fade with dark text in light, black with white in dark, flipped
                     // only when the picture needs it. Without a banner it is not used.
                     val tone = rememberBannerTone(bannerFile)
-                    val toneBrush = remember(tone) { tone.brush() }
 
                     if (bannerFile != null) {
                         // Penentu tinggi kartu: tanpa ikon 145dp, banner (matchParentSize) tidak punya ukuran sendiri.
@@ -555,11 +554,11 @@ fun StatusCard(
                             )
                         }
                     }
-                    if (bannerFile == null || isDark) {
+                    if (bannerFile == null) {
                         Box(
                             modifier = Modifier
                                 .matchParentSize()
-                                .background(if (bannerFile != null) toneBrush else fadeBrush)
+                                .background(fadeBrush)
                         )
                     }
                     CompositionLocalProvider(

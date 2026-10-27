@@ -440,7 +440,7 @@ class AxActivity : ComponentActivity() {
         // lepas jari -> pindah kalau cukup jauh atau cukup cepat, kalau tidak balik ke semula.
         val swipeScope = rememberCoroutineScope()
         val density = LocalDensity.current
-        val flingThresholdPx = with(density) { 600.dp.toPx() }
+        val flingThresholdPx = with(density) { 250.dp.toPx() }
         val currentRoute = rememberUpdatedState(currentDestination?.route)
         val nextTab = swipeTabs.getOrNull(currentTabIndex + 1)?.takeIf { currentTabIndex >= 0 }
         val prevTab = swipeTabs.getOrNull(currentTabIndex - 1)?.takeIf { currentTabIndex >= 0 }
@@ -1178,9 +1178,11 @@ private class TabSwipeState {
                 return
             }
             val toLeft = offsetPx < 0f
-            val farEnough = abs(offsetPx) > w * 0.33f
-            val flung = abs(offsetPx) > 8f && abs(velocity) > flingThresholdPx &&
-                (velocity < 0f) == toLeft
+            val along = if (toLeft) -velocity else velocity
+            val farEnough = abs(offsetPx) > w * 0.22f
+            val flungForward = abs(offsetPx) > 8f && along > flingThresholdPx
+            val flungBack = along < -flingThresholdPx
+            val commit = flungForward || (farEnough && !flungBack)
             // visibilityThreshold dalam px: tanpa ini spring Float baru "selesai" di 0,01 px,
             // ekor animasi yang tak terlihat itu yang bikin pindah tab terasa menunggu.
             val spec = spring<Float>(
@@ -1189,7 +1191,7 @@ private class TabSwipeState {
                 visibilityThreshold = 1f
             )
 
-            if (target == null || !(farEnough || flung)) {
+            if (target == null || !commit) {
                 animate(offsetPx, 0f, velocity, spec) { v, _ -> offsetPx = v }
                 offsetPx = 0f
                 return
