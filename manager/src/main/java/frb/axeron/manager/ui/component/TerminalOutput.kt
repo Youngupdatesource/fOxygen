@@ -6,7 +6,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.togetherWith
-import kotlinx.coroutines.channels.Channel
 import android.os.Build
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -216,39 +215,9 @@ fun <K : Any> TerminalOutput(
         }
     }
     val version = buffer.snapshot.version
-    val generation = buffer.snapshot.generation
-
-    // ---- scroll to the end ----
-    val density = LocalDensity.current
-    var containerHeight by remember { mutableIntStateOf(0) }
-    // Between the top and bottom padding: where the lines are read.
-    val areaPx = (containerHeight - with(density) { contentPadding.calculateTopPadding().toPx() } -
-            with(density) { contentPadding.calculateBottomPadding().toPx() }).coerceAtLeast(0f)
-    val lineHeightPx = with(density) { style.lineHeight.toPx() }
-    val currentArea by rememberUpdatedState(areaPx)
-    val currentLineHeight by rememberUpdatedState(lineHeightPx)
-
-    /**
-     * The last line at the bottom of the list. One scroll with a negative offset (the list fills
-     * the lines above it), not a jump to the very end with a huge offset: that drops every line
-     * on screen and composes them all again, on each batch of a flood.
-     */
-    suspend fun scrollToEnd(onlyIfIdle: Boolean = false) {
-        // A scroll queued behind the user's drag would run when the finger lifts: a snap back.
-        if (onlyIfIdle && state.isScrollInProgress) return
-        val info = state.layoutInfo
-        val total = info.totalItemsCount
-        if (total == 0) return
-        // A wrapped last line can be taller than one line; its height is known once it is shown.
-        val lastHeight = info.visibleItemsInfo.lastOrNull()
-            ?.takeIf { it.index == total - 1 }?.size?.toFloat() ?: currentLineHeight
-        state.scrollToItem(total - 1, -(currentArea - lastHeight).coerceAtLeast(0f).roundToInt())
-    }
 
     // ---- follow mode ----
     var follow by remember { mutableStateOf(true) }
-    // Held scroll thumb: it decides where the list is, following must not fight it.
-    var thumbDragging by remember { mutableStateOf(false) }
     val atBottom by remember {
         derivedStateOf {
             val info = state.layoutInfo
@@ -258,20 +227,15 @@ fun <K : Any> TerminalOutput(
         }
     }
     val dragged by state.interactionSource.collectIsDraggedAsState()
-    LaunchedEffect(dragged, atBottom, thumbDragging) {
-        if (thumbDragging) return@LaunchedEffect
+    LaunchedEffect(dragged, atBottom) {
         if (atBottom) follow = true
         else if (dragged) follow = false
     }
     // Once per published snapshot (throttled by the buffer), not per chunk. Jump instantly:
-    // rapid output would keep cancelling an animated scroll. Keyed on the list's own item count
-    // too: the snapshot can arrive before the list has laid the new lines out, and then the
-    // scroll above would land one batch short for good once the output stops.
+    // rapid output would keep cancelling an animated scroll.
     LaunchedEffect(state, buffer) {
-        snapshotFlow {
-            Triple(state.layoutInfo.totalItemsCount, buffer.snapshot.version, follow && !thumbDragging)
-        }.collect { (total, _, following) ->
-            if (following && total > 0) scrollToEnd(onlyIfIdle = true)
+        snapshotFlow { view to follow }.collect { (shown, following) ->
+            if (following && shown.count > 0) state.scrollToItem(shown.count - 1, Int.MAX_VALUE)
         }
     }
 
@@ -288,6 +252,7 @@ fun <K : Any> TerminalOutput(
     }
 
     // ---- gutter ----
+    val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val charWidth = remember(style, density) { measurer.measure("0", style).size.width }
     val digits = maxOf(3, buffer.snapshot.tail.toString().length)
@@ -310,6 +275,7 @@ fun <K : Any> TerminalOutput(
     var showGoTo by remember { mutableStateOf(false) }
     var pillExpanded by remember { mutableStateOf(false) }
     var pillTick by remember { mutableIntStateOf(0) }
+    var thumbDragging by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // ---- find in output ----
@@ -455,11 +421,7 @@ fun <K : Any> TerminalOutput(
     }
     val showScrollbar = canScroll && view.count > SCROLLBAR_MIN_LINES
 
-    Box(
-        modifier
-            .onSizeChanged { containerHeight = it.height }
-            .onPlaced { registry.container = it }
-    ) {
+    Box(modifier.onPlaced { registry.container = it }) {
         LazyColumn(
             state = state,
             contentPadding = contentPadding,
@@ -506,13 +468,7 @@ fun <K : Any> TerminalOutput(
             ) { i ->
                 val position = shown.positionAt(i)
                 // Re-read on every publish: an open line (progress bar) changes in place.
-                val fresh = remember(position, version) { buffer.lineAt(position) }
-                // A line that is gone between two snapshots (a screen clear, the oldest lines
-                // dropped) keeps showing what it showed until the next snapshot removes the
-                // row: a blank row for a frame or two reads as flicker.
-                val kept = remember(position, generation) { KeptLine<K>() }
-                if (fresh != null) kept.line = fresh
-                val line = kept.line
+                val line = remember(position, version) { buffer.lineAt(position) }
                 if (line == null) {
                     // Gone before the next snapshot (clear, screen clear): keep one line's
                     // height. A zero-height item makes a scrolling list compose every
@@ -740,7 +696,7 @@ fun <K : Any> TerminalOutput(
                 onBottom = {
                     pillTick++
                     follow = true
-                    scope.launch { scrollToEnd() }
+                    scope.launch { state.scrollToItem((view.count - 1).coerceAtLeast(0), Int.MAX_VALUE) }
                 }
             )
         }
@@ -840,15 +796,7 @@ private class FilterIndex<K : Any>(private val filter: (K) -> Boolean) {
     }
 }
 
-/**
- * Draggable thumb on the right edge; maps the touch position straight to a line.
- *
- * A move only asks for a scroll: the latest target goes into a conflated channel and ONE
- * collector applies it, at most once per frame. Launching a scroll per touch event queued them
- * up behind each other (every one composes a whole screen of new lines), so the list kept
- * catching up with positions the finger had left long ago. The gesture is not keyed on the
- * line count either: output that keeps arriving would restart it and drop the finger.
- */
+/** Draggable thumb on the right edge; maps the touch position straight to a line. */
 @Composable
 private fun FastScrollbar(
     state: LazyListState,
@@ -857,27 +805,13 @@ private fun FastScrollbar(
     onDragEnd: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val thumbHeight = 44.dp
     val thumbPx = with(density) { thumbHeight.toPx() }
     var trackPx by remember { mutableIntStateOf(0) }
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
-    val currentCount by rememberUpdatedState(count)
-    val currentDragStart by rememberUpdatedState(onDragStart)
-    val currentDragEnd by rememberUpdatedState(onDragEnd)
-
-    val targets = remember { Channel<Int>(Channel.CONFLATED) }
-    LaunchedEffect(state, targets) {
-        for (target in targets) {
-            state.scrollToItem(target)
-            withFrameNanos { } // next frame at the earliest: never two screens of text per frame
-        }
-    }
-    // Removed mid-drag (output cleared, list too short now): don't leave the owner holding on.
-    DisposableEffect(Unit) {
-        onDispose { if (dragging) currentDragEnd() }
-    }
 
     val scrollFraction by remember(count) {
         derivedStateOf {
@@ -897,25 +831,26 @@ private fun FastScrollbar(
             .fillMaxHeight()
             .width(22.dp)
             .onSizeChanged { trackPx = it.height }
-            .pointerInput(thumbPx) {
+            .pointerInput(count) {
                 fun jump(y: Float) {
                     val range = (trackPx - thumbPx).coerceAtLeast(1f)
                     dragFraction = ((y - thumbPx / 2) / range).coerceIn(0f, 1f)
-                    targets.trySend((dragFraction * (currentCount - 1)).roundToInt().coerceAtLeast(0))
+                    val target = (dragFraction * (count - 1)).roundToInt()
+                    scope.launch { state.scrollToItem(target) }
                 }
                 detectVerticalDragGestures(
                     onDragStart = {
                         dragging = true
-                        currentDragStart()
+                        onDragStart()
                         jump(it.y)
                     },
                     onDragEnd = {
                         dragging = false
-                        currentDragEnd()
+                        onDragEnd()
                     },
                     onDragCancel = {
                         dragging = false
-                        currentDragEnd()
+                        onDragEnd()
                     }
                 ) { change, _ ->
                     change.consume()
@@ -934,11 +869,6 @@ private fun FastScrollbar(
                 .background(thumbColor.copy(alpha = alpha))
         )
     }
-}
-
-/** The last line a row showed; plain holder, written during composition. */
-private class KeptLine<K : Any> {
-    var line: TerminalBuffer.Line<K>? = null
 }
 
 private enum class TopBar { None, Selection, Search }
