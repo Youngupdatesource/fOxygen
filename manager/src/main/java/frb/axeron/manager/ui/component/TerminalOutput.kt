@@ -213,6 +213,31 @@ fun <K : Any> TerminalOutput(
     }
     val version = buffer.snapshot.version
 
+    // ---- scroll to the end ----
+    val density = LocalDensity.current
+    var containerHeight by remember { mutableIntStateOf(0) }
+    // Between the top and bottom padding: where the lines are read.
+    val areaPx = (containerHeight - with(density) { contentPadding.calculateTopPadding().toPx() } -
+            with(density) { contentPadding.calculateBottomPadding().toPx() }).coerceAtLeast(0f)
+    val lineHeightPx = with(density) { style.lineHeight.toPx() }
+    val currentArea by rememberUpdatedState(areaPx)
+    val currentLineHeight by rememberUpdatedState(lineHeightPx)
+
+    /**
+     * The last line at the bottom of the list. One scroll with a negative offset (the list fills
+     * the lines above it), not a jump to the very end with a huge offset: that drops every line
+     * on screen and composes them all again, on each batch of a flood.
+     */
+    suspend fun scrollToEnd() {
+        val info = state.layoutInfo
+        val total = info.totalItemsCount
+        if (total == 0) return
+        // A wrapped last line can be taller than one line; its height is known once it is shown.
+        val lastHeight = info.visibleItemsInfo.lastOrNull()
+            ?.takeIf { it.index == total - 1 }?.size?.toFloat() ?: currentLineHeight
+        state.scrollToItem(total - 1, -(currentArea - lastHeight).coerceAtLeast(0f).roundToInt())
+    }
+
     // ---- follow mode ----
     var follow by remember { mutableStateOf(true) }
     val atBottom by remember {
@@ -229,10 +254,14 @@ fun <K : Any> TerminalOutput(
         else if (dragged) follow = false
     }
     // Once per published snapshot (throttled by the buffer), not per chunk. Jump instantly:
-    // rapid output would keep cancelling an animated scroll.
+    // rapid output would keep cancelling an animated scroll. Keyed on the list's own item count
+    // too: the snapshot can arrive before the list has laid the new lines out, and then the
+    // scroll above would land one batch short for good once the output stops.
     LaunchedEffect(state, buffer) {
-        snapshotFlow { view to follow }.collect { (shown, following) ->
-            if (following && shown.count > 0) state.scrollToItem(shown.count - 1, Int.MAX_VALUE)
+        snapshotFlow {
+            Triple(state.layoutInfo.totalItemsCount, buffer.snapshot.version, follow)
+        }.collect { (total, _, following) ->
+            if (following && total > 0) scrollToEnd()
         }
     }
 
@@ -249,7 +278,6 @@ fun <K : Any> TerminalOutput(
     }
 
     // ---- gutter ----
-    val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val charWidth = remember(style, density) { measurer.measure("0", style).size.width }
     val digits = maxOf(3, buffer.snapshot.tail.toString().length)
@@ -416,7 +444,11 @@ fun <K : Any> TerminalOutput(
     }
     val showScrollbar = canScroll && view.count > SCROLLBAR_MIN_LINES
 
-    Box(modifier.onPlaced { registry.container = it }) {
+    Box(
+        modifier
+            .onSizeChanged { containerHeight = it.height }
+            .onPlaced { registry.container = it }
+    ) {
         LazyColumn(
             state = state,
             contentPadding = contentPadding,
@@ -678,7 +710,7 @@ fun <K : Any> TerminalOutput(
                 onBottom = {
                     pillTick++
                     follow = true
-                    scope.launch { state.scrollToItem((view.count - 1).coerceAtLeast(0), Int.MAX_VALUE) }
+                    scope.launch { scrollToEnd() }
                 }
             )
         }
