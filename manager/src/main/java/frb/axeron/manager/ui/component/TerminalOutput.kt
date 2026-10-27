@@ -3,6 +3,10 @@ package frb.axeron.manager.ui.component
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.togetherWith
+import kotlinx.coroutines.channels.Channel
 import android.os.Build
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -240,6 +244,8 @@ fun <K : Any> TerminalOutput(
 
     // ---- follow mode ----
     var follow by remember { mutableStateOf(true) }
+    // Held scroll thumb: it decides where the list is, following must not fight it.
+    var thumbDragging by remember { mutableStateOf(false) }
     val atBottom by remember {
         derivedStateOf {
             val info = state.layoutInfo
@@ -249,7 +255,8 @@ fun <K : Any> TerminalOutput(
         }
     }
     val dragged by state.interactionSource.collectIsDraggedAsState()
-    LaunchedEffect(dragged, atBottom) {
+    LaunchedEffect(dragged, atBottom, thumbDragging) {
+        if (thumbDragging) return@LaunchedEffect
         if (atBottom) follow = true
         else if (dragged) follow = false
     }
@@ -259,7 +266,7 @@ fun <K : Any> TerminalOutput(
     // scroll above would land one batch short for good once the output stops.
     LaunchedEffect(state, buffer) {
         snapshotFlow {
-            Triple(state.layoutInfo.totalItemsCount, buffer.snapshot.version, follow)
+            Triple(state.layoutInfo.totalItemsCount, buffer.snapshot.version, follow && !thumbDragging)
         }.collect { (total, _, following) ->
             if (following && total > 0) scrollToEnd()
         }
@@ -300,7 +307,6 @@ fun <K : Any> TerminalOutput(
     var showGoTo by remember { mutableStateOf(false) }
     var pillExpanded by remember { mutableStateOf(false) }
     var pillTick by remember { mutableIntStateOf(0) }
-    var thumbDragging by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // ---- find in output ----
@@ -391,6 +397,8 @@ fun <K : Any> TerminalOutput(
         snapshotFlow { buffer.snapshot.generation }.collect { selection = null }
     }
     BackHandler(enabled = selection != null) { selection = null }
+    // Whoever opens the find bar (the nav pill, the owner), the bar on top must be the find bar.
+    LaunchedEffect(searchOpen) { if (searchOpen) selection = null }
 
     /** Starts dragging one end of the selection; the other end stays put. */
     fun beginHandleDrag(isStart: Boolean, finger: Offset): Offset? {
@@ -617,50 +625,60 @@ fun <K : Any> TerminalOutput(
             }
         }
 
-        // The selection bar takes the find bar's place while text is selected.
-        AnimatedVisibility(
-            visible = selection != null,
-            enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0f)),
-            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0f)),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = contentPadding.calculateTopPadding())
-                .padding(horizontal = 4.dp)
-        ) {
-            TerminalSelectionBar(
-                onCopy = { copySelection() },
-                onSelectAll = {
-                    val v = view
-                    if (v.count > 0) {
-                        selection = TextSelection(
-                            Anchor(v.positionAt(0), 0),
-                            Anchor(v.positionAt(v.count - 1), Int.MAX_VALUE)
-                        )
-                    }
-                },
-                onClose = { selection = null }
-            )
+        // One slot for the bars on top, so they swap instead of stacking: the selection bar
+        // wins while text is selected, and the find bar comes back once it is gone.
+        val topBar = when {
+            selection != null -> TopBar.Selection
+            searchOpen && searchEnabled -> TopBar.Search
+            else -> TopBar.None
         }
-
-        AnimatedVisibility(
-            visible = searchOpen && searchEnabled && selection == null,
-            enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0f)),
-            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0f)),
+        AnimatedContent(
+            targetState = topBar,
+            transitionSpec = {
+                val origin = TransformOrigin(0.5f, 0f)
+                // The old bar is gone before the new one fades in: no overlap in between.
+                (fadeIn(tween(160, delayMillis = 90)) +
+                        scaleIn(tween(160, delayMillis = 90), initialScale = 0.92f, transformOrigin = origin))
+                    .togetherWith(
+                        fadeOut(tween(90)) + scaleOut(tween(90), targetScale = 0.92f, transformOrigin = origin)
+                    )
+                    .using(SizeTransform(clip = false))
+            },
+            contentAlignment = Alignment.TopCenter,
+            label = "terminalTopBar",
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = contentPadding.calculateTopPadding())
                 .padding(horizontal = 4.dp)
-        ) {
-            TerminalSearchBar(
-                query = query,
-                onQueryChange = { query = it },
-                current = current,
-                total = matches.size,
-                capped = matches.size >= SEARCH_LIMIT,
-                onPrevious = { step(-1) },
-                onNext = { step(1) },
-                onClose = { closeSearch() }
-            )
+        ) { bar ->
+            when (bar) {
+                TopBar.Selection -> TerminalSelectionBar(
+                    onCopy = { copySelection() },
+                    onSelectAll = {
+                        val v = view
+                        if (v.count > 0) {
+                            selection = TextSelection(
+                                Anchor(v.positionAt(0), 0),
+                                Anchor(v.positionAt(v.count - 1), Int.MAX_VALUE)
+                            )
+                        }
+                    },
+                    onClose = { selection = null }
+                )
+
+                TopBar.Search -> TerminalSearchBar(
+                    query = query,
+                    onQueryChange = { query = it },
+                    current = current,
+                    total = matches.size,
+                    capped = matches.size >= SEARCH_LIMIT,
+                    onPrevious = { step(-1) },
+                    onNext = { step(1) },
+                    onClose = { closeSearch() }
+                )
+
+                TopBar.None -> Box(Modifier.size(0.dp))
+            }
         }
 
         AnimatedVisibility(
@@ -696,6 +714,9 @@ fun <K : Any> TerminalOutput(
                 onExpand = { pillTick++ },
                 onSearch = {
                     pillTick++
+                    // The find bar may already be "open" behind the selection bar: no change
+                    // of searchOpen would follow, so drop the selection right here.
+                    selection = null
                     onSearchOpenChange?.invoke(true)
                 },
                 onTop = {
@@ -810,7 +831,15 @@ private class FilterIndex<K : Any>(private val filter: (K) -> Boolean) {
     }
 }
 
-/** Draggable thumb on the right edge; maps the touch position straight to a line. */
+/**
+ * Draggable thumb on the right edge; maps the touch position straight to a line.
+ *
+ * A move only asks for a scroll: the latest target goes into a conflated channel and ONE
+ * collector applies it, at most once per frame. Launching a scroll per touch event queued them
+ * up behind each other (every one composes a whole screen of new lines), so the list kept
+ * catching up with positions the finger had left long ago. The gesture is not keyed on the
+ * line count either: output that keeps arriving would restart it and drop the finger.
+ */
 @Composable
 private fun FastScrollbar(
     state: LazyListState,
@@ -819,13 +848,27 @@ private fun FastScrollbar(
     onDragEnd: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val thumbHeight = 44.dp
     val thumbPx = with(density) { thumbHeight.toPx() }
     var trackPx by remember { mutableIntStateOf(0) }
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
+    val currentCount by rememberUpdatedState(count)
+    val currentDragStart by rememberUpdatedState(onDragStart)
+    val currentDragEnd by rememberUpdatedState(onDragEnd)
+
+    val targets = remember { Channel<Int>(Channel.CONFLATED) }
+    LaunchedEffect(state, targets) {
+        for (target in targets) {
+            state.scrollToItem(target)
+            withFrameNanos { } // next frame at the earliest: never two screens of text per frame
+        }
+    }
+    // Removed mid-drag (output cleared, list too short now): don't leave the owner holding on.
+    DisposableEffect(Unit) {
+        onDispose { if (dragging) currentDragEnd() }
+    }
 
     val scrollFraction by remember(count) {
         derivedStateOf {
@@ -845,26 +888,25 @@ private fun FastScrollbar(
             .fillMaxHeight()
             .width(22.dp)
             .onSizeChanged { trackPx = it.height }
-            .pointerInput(count) {
+            .pointerInput(thumbPx) {
                 fun jump(y: Float) {
                     val range = (trackPx - thumbPx).coerceAtLeast(1f)
                     dragFraction = ((y - thumbPx / 2) / range).coerceIn(0f, 1f)
-                    val target = (dragFraction * (count - 1)).roundToInt()
-                    scope.launch { state.scrollToItem(target) }
+                    targets.trySend((dragFraction * (currentCount - 1)).roundToInt().coerceAtLeast(0))
                 }
                 detectVerticalDragGestures(
                     onDragStart = {
                         dragging = true
-                        onDragStart()
+                        currentDragStart()
                         jump(it.y)
                     },
                     onDragEnd = {
                         dragging = false
-                        onDragEnd()
+                        currentDragEnd()
                     },
                     onDragCancel = {
                         dragging = false
-                        onDragEnd()
+                        currentDragEnd()
                     }
                 ) { change, _ ->
                     change.consume()
@@ -884,6 +926,8 @@ private fun FastScrollbar(
         )
     }
 }
+
+private enum class TopBar { None, Selection, Search }
 
 /** Shown while text is selected: copy / select all / clear. */
 @Composable
