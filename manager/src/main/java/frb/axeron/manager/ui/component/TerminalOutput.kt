@@ -216,6 +216,7 @@ fun <K : Any> TerminalOutput(
         }
     }
     val version = buffer.snapshot.version
+    val generation = buffer.snapshot.generation
 
     // ---- scroll to the end ----
     val density = LocalDensity.current
@@ -232,7 +233,9 @@ fun <K : Any> TerminalOutput(
      * the lines above it), not a jump to the very end with a huge offset: that drops every line
      * on screen and composes them all again, on each batch of a flood.
      */
-    suspend fun scrollToEnd() {
+    suspend fun scrollToEnd(onlyIfIdle: Boolean = false) {
+        // A scroll queued behind the user's drag would run when the finger lifts: a snap back.
+        if (onlyIfIdle && state.isScrollInProgress) return
         val info = state.layoutInfo
         val total = info.totalItemsCount
         if (total == 0) return
@@ -268,7 +271,7 @@ fun <K : Any> TerminalOutput(
         snapshotFlow {
             Triple(state.layoutInfo.totalItemsCount, buffer.snapshot.version, follow && !thumbDragging)
         }.collect { (total, _, following) ->
-            if (following && total > 0) scrollToEnd()
+            if (following && total > 0) scrollToEnd(onlyIfIdle = true)
         }
     }
 
@@ -503,7 +506,13 @@ fun <K : Any> TerminalOutput(
             ) { i ->
                 val position = shown.positionAt(i)
                 // Re-read on every publish: an open line (progress bar) changes in place.
-                val line = remember(position, version) { buffer.lineAt(position) }
+                val fresh = remember(position, version) { buffer.lineAt(position) }
+                // A line that is gone between two snapshots (a screen clear, the oldest lines
+                // dropped) keeps showing what it showed until the next snapshot removes the
+                // row: a blank row for a frame or two reads as flicker.
+                val kept = remember(position, generation) { KeptLine<K>() }
+                if (fresh != null) kept.line = fresh
+                val line = kept.line
                 if (line == null) {
                     // Gone before the next snapshot (clear, screen clear): keep one line's
                     // height. A zero-height item makes a scrolling list compose every
@@ -925,6 +934,11 @@ private fun FastScrollbar(
                 .background(thumbColor.copy(alpha = alpha))
         )
     }
+}
+
+/** The last line a row showed; plain holder, written during composition. */
+private class KeptLine<K : Any> {
+    var line: TerminalBuffer.Line<K>? = null
 }
 
 private enum class TopBar { None, Selection, Search }

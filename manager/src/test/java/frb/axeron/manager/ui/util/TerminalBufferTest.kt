@@ -1,5 +1,9 @@
 package frb.axeron.manager.ui.util
 
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
+import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -242,6 +246,27 @@ class TerminalBufferTest {
         b.write(K.OUT, (0 until 500).joinToString("") { "$line$it\n" })
         assertEquals(500, b.texts().size)
         b.texts().forEachIndexed { i, text -> assertEquals("$line$i", text) }
+    }
+
+    @Test
+    fun readingWhileParsingNeverReturnsTheWrongLine() {
+        // Reads of the memory store take no lock; a slot reused under the reader is a miss.
+        val b = TerminalBuffer<K>(maxLines = 500, worker = { it.run() }, publisher = { it.run() })
+        val stop = AtomicBoolean(false)
+        val wrong = AtomicInteger()
+        val reader = thread {
+            while (!stop.get()) {
+                val s = b.snapshot
+                if (s.size == 0) continue
+                val p = s.head + Random.nextLong(s.size.toLong())
+                val line = b.lineAt(p) ?: continue
+                if (line.text != "n${line.number}" || line.number != p + 1) wrong.incrementAndGet()
+            }
+        }
+        for (i in 1..200_000) b.write(K.OUT, "n$i\n")
+        stop.set(true)
+        reader.join()
+        assertEquals(0, wrong.get())
     }
 
     // ---- unlimited (spool) mode ----

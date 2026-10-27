@@ -16,9 +16,11 @@ import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.io.RandomAccessFile
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.asExecutor
+import java.util.concurrent.atomic.AtomicReferenceArray
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * Line model for command output, fed with the raw stream exactly as the process wrote it.
@@ -55,7 +57,7 @@ class TerminalBuffer<K : Any>(
     unlimited: Boolean = false,
     /** Shortest time between two snapshots; floods stretch it (see [publish]). */
     private val publishIntervalMs: Long = 16,
-    private val worker: Executor = Dispatchers.Default.asExecutor(),
+    private val worker: Executor = PARSER,
     /** Test hook: runs the publish task right away instead of on the main thread. */
     private val publisher: ((Runnable) -> Unit)? = null,
 ) {
@@ -106,9 +108,10 @@ class TerminalBuffer<K : Any>(
      * half parsed) is thrown away; only [setUnlimited] survives. No backlog to wait for.
      */
     fun clear() {
-        synchronized(stateLock) {
+        stateLock.withLock {
             epoch++
             applyLocked(Op.Clear)
+            stable = snapshotLocked()
         }
         publish()
     }
@@ -120,7 +123,7 @@ class TerminalBuffer<K : Any>(
     fun setUnlimited(enabled: Boolean) = enqueue(Op.SetUnlimited(enabled))
 
     /** Releases the spool file. Later writes are ignored. */
-    fun close() = synchronized(stateLock) {
+    fun close() = stateLock.withLock {
         closed = true
         store.close()
     }
@@ -128,7 +131,13 @@ class TerminalBuffer<K : Any>(
     // ---- reading ----
 
     /** The line at absolute [position], or null when it is gone. Cheap; safe on the main thread. */
-    fun lineAt(position: Long): Line<K>? = synchronized(stateLock) { safeLine(position) }
+    fun lineAt(position: Long): Line<K>? {
+        val s = store
+        // The memory store is read without the lock (see RingStore): the main thread, which
+        // reads every visible line on every frame, never waits for the parser.
+        if (s is RingStore<K>) return if (closed) null else s.line(position)
+        return stateLock.withLock { safeLine(position) }
+    }
 
     /** A failed spool read (closed, I/O error) shows as a missing line, never a crash. */
     private fun safeLine(position: Long): Line<K>? =
@@ -140,7 +149,7 @@ class TerminalBuffer<K : Any>(
 
     /** Kinds of the lines in [from, to), in one lock acquisition. */
     fun forEachKind(from: Long, to: Long, block: (position: Long, kind: K) -> Unit) =
-        synchronized(stateLock) {
+        stateLock.withLock {
             var p = maxOf(from, store.head)
             val end = minOf(to, store.tail)
             while (p < end) {
@@ -150,14 +159,14 @@ class TerminalBuffer<K : Any>(
         }
 
     /** All current lines. Fine for tests and small output; use [writeTo] for big output. */
-    fun toList(): List<Line<K>> = synchronized(stateLock) {
+    fun toList(): List<Line<K>> = stateLock.withLock {
         (store.head until store.tail).mapNotNull { safeLine(it) }
     }
 
     /** Plain text (ANSI stripped) of up to the last [lastLines] lines passing [filter]. */
     fun text(filter: (K) -> Boolean = { true }, lastLines: Int = Int.MAX_VALUE): String =
         buildString {
-            val from = synchronized(stateLock) {
+            val from = stateLock.withLock {
                 maxOf(store.head, store.tail - lastLines.toLong())
             }
             forEachLine(from, filter) {
@@ -172,7 +181,7 @@ class TerminalBuffer<K : Any>(
      */
     fun writeTo(out: OutputStream, filter: (K) -> Boolean = { true }) {
         val writer = BufferedWriter(OutputStreamWriter(out, Charsets.UTF_8), 64 * 1024)
-        val from = synchronized(stateLock) { store.head }
+        val from = stateLock.withLock { store.head }
         forEachLine(from, filter) {
             writer.write(AnsiFilter.stripAnsi(it.text))
             writer.write('\n'.code)
@@ -199,7 +208,7 @@ class TerminalBuffer<K : Any>(
     ): List<Match> {
         if (query.isEmpty()) return emptyList()
         val matches = ArrayList<Match>()
-        val from = synchronized(stateLock) { store.head }
+        val from = stateLock.withLock { store.head }
         forEachLine(from, filter, stop) { line ->
             val text = AnsiFilter.stripAnsi(line.text)
             var i = text.indexOf(query, ignoreCase = true)
@@ -225,7 +234,7 @@ class TerminalBuffer<K : Any>(
     ) {
         var position = from
         while (!stop()) {
-            val batch = synchronized(stateLock) {
+            val batch = stateLock.withLock {
                 if (position < store.head) position = store.head
                 val end = minOf(store.tail, position + 512)
                 val lines = ArrayList<Line<K>>((end - position).toInt().coerceAtLeast(0))
@@ -311,10 +320,11 @@ class TerminalBuffer<K : Any>(
                     }
                     writeSliced(op.kind as K, merged?.toString() ?: op.chunk, first.epoch)
                 } else {
-                    synchronized(stateLock) {
+                    stateLock.withLock {
                         if (first.epoch == epoch || op is Op.SetUnlimited) applyLocked(op)
                     }
                 }
+                captureStable()
                 schedulePublish()
             }
         }
@@ -329,7 +339,7 @@ class TerminalBuffer<K : Any>(
         while (from < text.length) {
             val to = minOf(from + SLICE_CHARS, text.length)
             val last = to == text.length
-            val alive = synchronized(stateLock) {
+            val alive = stateLock.withLock {
                 if (closed || opEpoch != epoch) {
                     false
                 } else {
@@ -406,10 +416,17 @@ class TerminalBuffer<K : Any>(
         var dirty = false
     }
 
-    private val stateLock = Any()
+    /**
+     * Fair on purpose: with a plain monitor the parser can release and take the lock again
+     * before a waiting main thread wakes up, and a long backlog (output that piled up while the
+     * app was away) would starve the UI for many slices in a row.
+     */
+    private val stateLock = ReentrantLock(true)
+    @Volatile
     private var store: Store<K> =
         if (unlimited && spoolDir != null) SpoolStore(spoolDir, 0) else RingStore(maxLines, 0)
     private val streams = HashMap<K, StreamState>()
+    @Volatile
     private var closed = false
     private var screenStart = 0L
     private var version = 0L
@@ -563,6 +580,7 @@ class TerminalBuffer<K : Any>(
     }
 
     private fun clearScreen() {
+        lastScreenClearNs = System.nanoTime()
         val keep = screenStart.coerceIn(store.head, store.tail)
         if (keep < store.tail) {
             store.truncate(keep)
@@ -586,7 +604,41 @@ class TerminalBuffer<K : Any>(
     @Volatile
     private var interval = publishIntervalMs
 
-    private val publishTask = Runnable {
+    /**
+     * What the UI may show: the state between two ops, never the middle of one. A redraw that
+     * clears the screen and writes it again (top, watch, a progress UI) would otherwise be
+     * caught half way and flash as a blank or half empty screen.
+     */
+    @Volatile
+    private var stable = Snapshot()
+
+    /** When the last screen clear was parsed; the publish waits a moment for the redraw. */
+    @Volatile
+    private var lastScreenClearNs = 0L
+    private var settleDeferrals = 0
+
+    private fun snapshotLocked() =
+        Snapshot(store.head, store.tail, version, generation, store is SpoolStore)
+
+    /** Worker, between ops. */
+    private fun captureStable() {
+        stateLock.withLock { stable = snapshotLocked() }
+    }
+
+    private val publishTask = Runnable { runPublish() }
+
+    private fun runPublish() {
+        if (publisher == null && settleDeferrals < MAX_SETTLE_DEFERRALS) {
+            val since = System.nanoTime() - lastScreenClearNs
+            if (since in 0 until SETTLE_NS) {
+                // A screen was just cleared: its redraw is most likely still arriving. The
+                // pending flag stays set, so nothing else is scheduled meanwhile.
+                settleDeferrals++
+                mainHandler.postDelayed(publishTask, ((SETTLE_NS - since) / 1_000_000L).coerceAtLeast(1))
+                return
+            }
+        }
+        settleDeferrals = 0
         // Cleared first: a change that lands after this point schedules the next publish.
         publishPending.set(false)
         publish()
@@ -611,9 +663,7 @@ class TerminalBuffer<K : Any>(
      * cost far less than one per frame.
      */
     private fun publish() {
-        val next = synchronized(stateLock) {
-            Snapshot(store.head, store.tail, version, generation, store is SpoolStore)
-        }
+        val next = stable
         synchronized(publishLock) {
             val now = System.nanoTime()
             val dt = now - lastPublishNs
@@ -656,51 +706,64 @@ class TerminalBuffer<K : Any>(
     }
 
     /** The last [max] lines in memory. */
-    private class RingStore<K : Any>(private val max: Int, base: Long) : Store<K> {
-        private val rows = ArrayDeque<Line<K>>()
+    /**
+     * The last [max] lines in a circular array. Written by one thread at a time (under
+     * stateLock) but read by anyone without a lock: [head] and [end] are volatile, the slots
+     * are atomic, and a reader checks the line's own number, so a slot that was reused while
+     * it was reading is a miss, never a wrong line. The head moves before the oldest slot is
+     * overwritten, and the new line is stored before [end] moves.
+     */
+    private class RingStore<K : Any>(max: Int, base: Long) : Store<K> {
+        private val max = maxOf(1, max)
+        private val rows = AtomicReferenceArray<Line<K>?>(this.max)
+
+        @Volatile
         override var head = base
             private set
-        override val tail get() = head + rows.size
+
+        @Volatile
+        private var end = base
+        override val tail: Long get() = end
+
+        private fun slot(position: Long) = (position % max).toInt()
 
         override fun add(kind: K, text: String, open: Boolean): Long {
-            val position = tail
-            rows.addLast(Line(position + 1, kind, text))
-            while (rows.size > max) {
-                rows.removeFirst()
-                head++
-            }
+            val position = end
+            if (position - head >= max) head = position - max + 1
+            rows.set(slot(position), Line(position + 1, kind, text))
+            end = position + 1
             return position
         }
 
         override fun update(position: Long, text: String, open: Boolean) {
-            val i = (position - head).toInt()
-            rows[i] = rows[i].copy(text = text)
+            val i = slot(position)
+            val row = rows.get(i) ?: return
+            rows.set(i, row.copy(text = text))
         }
 
         override fun finish(position: Long) = Unit
 
         override fun truncate(keep: Long) {
-            while (tail > keep && rows.isNotEmpty()) rows.removeLast()
+            if (keep < end) end = maxOf(keep, head)
         }
 
-        override fun line(position: Long): Line<K>? =
-            if (position in head until tail) rows[(position - head).toInt()] else null
+        override fun line(position: Long): Line<K>? {
+            if (position < head || position >= end) return null
+            val row = rows.get(slot(position)) ?: return null
+            return if (row.number == position + 1) row else null
+        }
 
         override fun kind(position: Long): K? = line(position)?.kind
 
         override fun clear() {
-            rows.clear()
+            end = 0
             head = 0
+            for (i in 0 until max) rows.set(i, null)
         }
 
         override fun close() = Unit
     }
 
-    /**
-     * Every line, text in an append-only spool file. Memory per line: offset + length + kind
-     * id in paged arrays. Open lines stay in memory until finished. Recently read lines are
-     * cached for scrolling.
-     */
     private class SpoolStore<K : Any>(dir: File, base: Long) : Store<K> {
         private val file: File
         private val raf: RandomAccessFile
@@ -860,11 +923,20 @@ class TerminalBuffer<K : Any>(
         const val ESC = '\u001B'
         const val MAX_ESCAPE = 64
 
+        /** One thread of its own: the shared coroutine pool may be busy or parked exactly when output resumes. */
+        private val PARSER: Executor by lazy {
+            Executors.newSingleThreadExecutor { r -> Thread(r, "TerminalParse").apply { isDaemon = true } }
+        }
+
         /** Characters parsed per lock hold: ~tens of microseconds, never a visible stall. */
         const val SLICE_CHARS = 4096
 
         /** Adjacent writes of one stream are merged up to about this many characters. */
         const val MERGE_CHARS = 64 * 1024
+
+        /** After a screen clear, wait this long for the redraw (at most [MAX_SETTLE_DEFERRALS] times). */
+        const val SETTLE_NS = 30_000_000L
+        const val MAX_SETTLE_DEFERRALS = 3
 
         const val MIN_RATE_WINDOW_NS = 4_000_000L
         const val IDLE_NS = 500_000_000L
