@@ -1,6 +1,7 @@
 package frb.axeron.manager.service
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.topjohnwu.superuser.Shell
 import frb.axeron.adb.util.AdbEnvironment
@@ -8,6 +9,8 @@ import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.core.Starter
 import frb.axeron.manager.adb.AdbStarter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -40,12 +43,26 @@ object ServerGuard {
      * Menyalakan ulang server memakai mode peluncuran terakhir.
      * Return true bila perintah start berhasil dikirim (bukan jaminan server sudah hidup).
      */
-    suspend fun restart(context: Context): Boolean =
+    suspend fun restart(context: Context): Boolean = restartLock.withLock {
+        lastRestartAt = SystemClock.elapsedRealtime()
         if (AxeronSettings.getLastLaunchMode() == AxeronSettings.LaunchMethod.ROOT) {
             restartViaRoot()
         } else {
             restartViaAdbTcp(context)
         }
+    }
+
+    // Satu restart pada satu waktu: auto-restart di UI dan job pemulihan tidak boleh saling menimpa.
+    private val restartLock = Mutex()
+
+    @Volatile
+    private var lastRestartAt = 0L
+
+    /** true bila restart baru saja dikirim dan server mungkin masih naik (jangan kirim lagi). */
+    fun restartedRecently(withinMs: Long): Boolean {
+        val at = lastRestartAt
+        return at != 0L && SystemClock.elapsedRealtime() - at < withinMs
+    }
 
     private suspend fun restartViaRoot(): Boolean = withContext(Dispatchers.IO) {
         runCatching {

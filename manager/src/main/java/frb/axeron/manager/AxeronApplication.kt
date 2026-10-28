@@ -14,6 +14,7 @@ import com.topjohnwu.superuser.Shell
 import frb.axeron.Axerish
 import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.core.Engine
+import frb.axeron.manager.service.ServerWatch
 import frb.axeron.manager.ui.util.ThrottledAppIconFetcher
 import frb.axeron.manager.ui.util.createShellBuilder
 import me.zhanghai.android.appiconloader.coil.AppIconKeyer
@@ -49,6 +50,11 @@ class AxeronApplication : Engine(), ImageLoaderFactory {
         super.attachBaseContext(base)
         axeronApp = this
         AxeronSettings.initialize(axeronApp)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        ServerWatch.start(this)
     }
 
     @Volatile
