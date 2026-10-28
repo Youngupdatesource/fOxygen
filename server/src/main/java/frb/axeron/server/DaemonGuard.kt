@@ -6,23 +6,20 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * Pengganti wakelock untuk kestabilan daemon, semuanya bisa dilakukan sebagai shell UID:
+ * Diagnostik startup saja. Tidak menyentuh wakelock, whitelist Doze, maupun appops: daemon
+ * dibiarkan mengikuti kebijakan idle sistem supaya device bisa masuk Doze/deep sleep secepatnya.
  *
- * 1. Diagnostik startup: mencatat cgroup, oom_score_adj, dan status adbd/USB. Dengan ini penyebab
- *    kematian daemon bisa dibuktikan dari log, bukan ditebak.
- * 2. Mengecualikan app manager dari pembatasan baterai (Doze whitelist + app ops background),
- *    supaya lapisan pemulih (WorkManager/auto-restart di manager) tetap berjalan saat idle.
- *    Ini tidak menahan CPU dan tidak membuat device tetap terjaga.
+ * Mencatat cgroup, oom_score_adj, dan status adbd/USB, jadi penyebab kematian daemon bisa
+ * dibuktikan dari log, bukan ditebak. Pemulihan dilakukan oleh job di manager (ServerHealthWorker).
  */
 object DaemonGuard {
     private val LOGGER = Logger("DaemonGuard")
 
     private const val CMD_TIMEOUT_SEC = 5L
 
-    fun start(managerPackage: String) {
+    fun start() {
         Thread({
             runCatching { logDiagnostics() }.onFailure { LOGGER.e("diagnostics failed", it) }
-            runCatching { exemptManager(managerPackage) }.onFailure { LOGGER.e("exempt failed", it) }
         }, "axeron-guard").apply { isDaemon = true }.start()
     }
 
@@ -42,15 +39,6 @@ object DaemonGuard {
         // Bukti apakah shell UID boleh memindahkan diri dari cgroup adbd (hanya dibaca, tidak diubah).
         val root = File("/sys/fs/cgroup/cgroup.procs")
         LOGGER.i("cgroup root writable=${root.canWrite()} exists=${root.exists()}")
-    }
-
-    private fun exemptManager(pkg: String) {
-        run("cmd", "deviceidle", "whitelist", "+$pkg").let {
-            LOGGER.i("deviceidle whitelist +$pkg -> $it")
-        }
-        for (op in listOf("RUN_ANY_IN_BACKGROUND", "RUN_IN_BACKGROUND")) {
-            LOGGER.i("appops $op allow -> ${run("cmd", "appops", "set", pkg, op, "allow")}")
-        }
     }
 
     private fun readFile(path: String): String = try {

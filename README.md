@@ -73,9 +73,9 @@ AxManager explores a dedicated **ADB environment** on Android: instead of being 
 
 **Reliability and power**
 - **Restart that comes back:** the starter runs detached from the server it replaces (output goes to `/data/local/tmp/axeron_restart.log`) and ignores a broken pipe, and the manager starts the server again by the last launch mode if it does not return within about 20 seconds.
-- **Configurable wake lock policy** for `axeron_server` (see below). The default holds no wake lock, so the device can reach deep sleep.
-- **Server Guard:** the manager checks the server periodically (WorkManager, every 30 minutes) and restarts it with exponential backoff if it stops unexpectedly. Intentional shutdowns and restarts from the app are respected, and auto-restart can be turned off with the `server_guard_auto_restart` setting.
-- **Daemon Guard:** on every server start, the daemon logs diagnostics (cgroup, `oom_score_adj`, adbd state) and exempts the manager from battery optimization and background restrictions. This does not keep the CPU awake.
+- **No wake lock, no idle exemption:** the server never takes a wake lock and neither app touches Doze (no `deviceidle` whitelist, no temporary whitelist, no battery-optimization request). The manager only keeps the screen on while Flash, Quick Shell or a plugin action is running, so the device can enter idle and deep sleep as early as the system allows.
+- **Server Guard:** the manager checks the server periodically (a WorkManager job every 30 minutes; the system runs it in its own idle windows) and restarts it with exponential backoff if it stops unexpectedly. Intentional shutdowns and restarts from the app are respected, and auto-restart can be turned off with the `server_guard_auto_restart` setting.
+- **Daemon Guard:** on every server start, the daemon only logs diagnostics (cgroup, `oom_score_adj`, adbd state). It changes no power setting.
 - The server retries the manager-app lookup before exiting, so a transient failure no longer kills the daemon.
 - The plugin igniter prefers the phone's own tools (toybox) and only falls back to BusyBox when a tool is missing. Scripts that declare `ASH_STANDALONE=1` still run on BusyBox.
 
@@ -84,18 +84,6 @@ AxManager explores a dedicated **ADB environment** on Android: instead of being 
 - Lines are rebuilt from the raw stream, so chunk boundaries never split a line, and `\r` progress bars overwrite their own line.
 - The last 20,000 lines stay in memory. An *unlimited lines* option keeps every line, spooled to a file on disk.
 - View options shared by every command-output screen: line numbers and text size.
-
-### Wake lock modes
-
-The mode is read once when the server starts, from a file named `ax_wakelock_mode` placed in the same folder as `ax_perm_companion` (the server prints the exact path in logcat on start).
-
-| File content | Behavior |
-| --- | --- |
-| *(missing or anything else)* | **never** (default). No wake lock is held. |
-| `adaptive` | A wake lock is held only while commands run, for 60 seconds after the last client call, and for the first 60 seconds after the server starts. |
-| `always` | A permanent wake lock, like the original AxManager. Uses more battery. |
-
-Restart the server after changing the file.
 
 ## 🔧 Build & Install
 
@@ -190,7 +178,7 @@ Or copy the APK to your phone and open it. fOxygen uses a different application 
 - [x] Auto-activate when using Wireless Debugging (test).
 - [x] [Plugin](https://fahrez182.github.io/AxManager/plugin/what-is-plugin.html) system for third-party extensions.
 - [x] Developer mode and advanced debugging tools.
-- [x] Server auto-recovery and configurable wake lock policy.
+- [x] Server auto-recovery and job-based recovery (no wake lock).
 - [x] axsh terminal shell with Rootless debugging.
 - [ ] App optimization based on profiles.
 

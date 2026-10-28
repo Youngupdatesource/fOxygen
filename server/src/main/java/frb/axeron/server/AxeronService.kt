@@ -15,7 +15,6 @@ import android.os.Binder
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
-import android.os.IPowerManager
 import android.os.Looper
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
@@ -65,7 +64,6 @@ import moe.shizuku.server.IRemoteProcess
 import moe.shizuku.server.IShizukuApplication
 import moe.shizuku.server.IShizukuService
 import rikka.hidden.compat.ActivityManagerApis
-import rikka.hidden.compat.DeviceIdleControllerApis
 import rikka.hidden.compat.PackageManagerApis
 import rikka.hidden.compat.PermissionManagerApis
 import rikka.hidden.compat.UserManagerApis
@@ -75,7 +73,6 @@ import rikka.rish.RishConfig
 import java.io.File
 import java.io.IOException
 import java.lang.ref.WeakReference
-import kotlin.concurrent.thread
 import kotlin.system.exitProcess
 
 
@@ -83,8 +80,6 @@ open class AxeronService :
     Service<AxeronUserServiceManager, AxeronClientManager, AxeronConfigManager>() {
 
     companion object {
-        private const val STARTUP_LEASE_MS = 60_000L
-        private const val CLIENT_ACTIVITY_TTL_MS = 60_000L
         private const val MANAGER_LOOKUP_ATTEMPTS = 4
         private const val MANAGER_LOOKUP_DELAY_MS = 750L
 
@@ -127,12 +122,6 @@ open class AxeronService :
                     LOGGER.e("waitSystemService failed", it)
                 }
             }
-        }
-
-        val powerManager: SystemServiceBinder<IPowerManager> by lazy {
-            SystemServiceBinder<IPowerManager>(
-                "power", IPowerManager.Stub::asInterface
-            )
         }
 
         @JvmStatic
@@ -194,21 +183,6 @@ open class AxeronService :
         }
 
         fun sendBinderToUserApp(binder: IBinder, packageName: String, userId: Int, retry: Boolean) {
-            try {
-                DeviceIdleControllerApis.addPowerSaveTempWhitelistApp(
-                    packageName, 30 * 1000, userId,
-                    316/* PowerExemptionManager#REASON_SHELL */, "shell"
-                )
-                LOGGER.v("Add %d:%s to power save temp whitelist for 30s", userId, packageName)
-            } catch (it: Throwable) {
-                LOGGER.e(
-                    it,
-                    "Failed to add %d:%s to power save temp whitelist",
-                    userId,
-                    packageName
-                )
-            }
-
             var name: String
             var extraBinder: String
             if (packageName == MANAGER_APPLICATION_ID) {
@@ -300,8 +274,6 @@ open class AxeronService :
         }
     }
 
-    val wakeLock = WakeLockController({ powerManager.get() }, onIdle = { Runtime.getRuntime().gc() })
-
     override fun onCreateUserServiceManager(): AxeronUserServiceManager {
         return AxeronUserServiceManager(getEnvironment(TYPE_ENV)?.getEnv())
     }
@@ -364,35 +336,11 @@ open class AxeronService :
         )
 
 
-    private val wakeLockModeFile =
-        File(
-            PathHelper.getWorkingPath(isRoot, AxeronApiConstant.folder.PARENT),
-            "ax_wakelock_mode"
-        )
-
-    private enum class WakeLockMode { NEVER, ADAPTIVE, ALWAYS }
-
-    // Default NEVER: daemon tidak menahan wakelock sama sekali supaya device bisa masuk idle/deep sleep.
-    // Isi file ax_wakelock_mode: "adaptive" (lease saat ada client/proses) atau "always" (permanen).
-    private val wakeLockMode: WakeLockMode = try {
-        if (wakeLockModeFile.exists()) {
-            when (wakeLockModeFile.readText().trim().lowercase()) {
-                "always" -> WakeLockMode.ALWAYS
-                "adaptive" -> WakeLockMode.ADAPTIVE
-                else -> WakeLockMode.NEVER
-            }
-        } else {
-            WakeLockMode.NEVER
-        }
-    } catch (e: Exception) {
-        WakeLockMode.NEVER
-    }
-
     /**
      * Flag file for the death watchdog below: present, every plugin's processes are stopped when
      * the server stops. Absent (the default), plugins keep running on their own. Read at the
-     * moment the server dies, so it can be switched without restarting the server. Like
-     * ax_wakelock_mode, it is a file in the working dir, not a setting.
+     * moment the server dies, so it can be switched without restarting the server. It is a file
+     * in the working dir, not a setting.
      */
     private val stopPluginsFlagFile =
         File(
@@ -461,7 +409,6 @@ open class AxeronService :
         waitSystemService(Context.ACTIVITY_SERVICE)
         waitSystemService(Context.USER_SERVICE)
         waitSystemService(Context.APP_OPS_SERVICE)
-        waitSystemService(Context.POWER_SERVICE)
 
         getManagerApplicationInfo() ?: exitProcess(ServerConstants.MANAGER_APP_NOT_FOUND)
 
@@ -486,7 +433,7 @@ open class AxeronService :
         // not in front of the manager's binder and not on the main looper.
         mainHandler.post {
             sendBinderToManager(this)
-            DaemonGuard.start(MANAGER_APPLICATION_ID)
+            DaemonGuard.start()
             Thread({
                 try {
                     shizukuService?.let { sendBinderToShizukuManager(it.asBinder()) }
@@ -495,21 +442,6 @@ open class AxeronService :
                     LOGGER.e(e, "send binder to the other apps failed")
                 }
             }, "axeron-send-binder").apply { isDaemon = true }.start()
-        }
-
-        when (wakeLockMode) {
-            WakeLockMode.ALWAYS -> {
-                wakeLock.acquire("keepalive", WakeLockController.NO_TIMEOUT)
-                LOGGER.i("wakelock mode always, file=${wakeLockModeFile.path}")
-            }
-
-            WakeLockMode.ADAPTIVE -> {
-                wakeLock.acquire("startup", STARTUP_LEASE_MS)
-                LOGGER.i("wakelock mode adaptive, file=${wakeLockModeFile.path}")
-            }
-
-            WakeLockMode.NEVER ->
-                LOGGER.i("wakelock mode never (default), write adaptive|always to ${wakeLockModeFile.path} to change")
         }
 
         startDeathWatchdog()
@@ -642,19 +574,12 @@ open class AxeronService :
             cmd.contentToString()
         )
 
-        val lease = if (wakeLockMode == WakeLockMode.NEVER) null
-        else wakeLock.acquire("newProcess:uid=${getCallingUid()}")
         val process: Process
         try {
             process = Runtime.getRuntime().exec(cmd, env, if (dir != null) File(dir) else null)
         } catch (e: IOException) {
-            lease?.close()
             throw IllegalStateException(e.message)
-        } catch (e: Throwable) {
-            lease?.close()
-            throw e
         }
-        if (lease != null) wakeLock.bind(lease, process)
 
         val clientRecord = clientManager.findClient(getCallingUid(), getCallingPid())
         val token = clientRecord?.client?.asBinder()
@@ -907,7 +832,6 @@ open class AxeronService :
     }
 
     override fun exit() {
-        wakeLock.shutdown()
         // Restart from the manager ends the process right after this; do not lose a pending write.
         runCatching { configManager.flush() }
         super.exit()
@@ -986,7 +910,6 @@ open class AxeronService :
             size: Long,
             status: ParcelFileDescriptor?
         ): IAxshProcess {
-            var lease: WakeLockController.Lease? = null
             try {
                 enforceCallingPermission("newAxshProcess")
 
@@ -1015,27 +938,14 @@ open class AxeronService :
                     command.contentToString()
                 )
 
-                if (wakeLockMode != WakeLockMode.NEVER) {
-                    lease = wakeLock.acquire("newAxshProcess:uid=$uid")
-                }
                 val owner = clientManager.findClient(uid, Binder.getCallingPid())
                     ?.client?.asBinder()
                 val process = AxshProcess.start(
                     command, env?.filterNotNull()?.toTypedArray(), null,
                     stdin, stdout, stderr, pty, size, status, owner
                 )
-                lease?.let { held ->
-                    thread(name = "axsh-lease", isDaemon = true) {
-                        try {
-                            process.waitFor()
-                        } finally {
-                            held.close()
-                        }
-                    }
-                }
                 return process
             } catch (e: Throwable) {
-                lease?.close()
                 for (fd in arrayOf(stdin, stdout, stderr, status)) {
                     try {
                         fd?.close()
@@ -1048,9 +958,6 @@ open class AxeronService :
     }
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-        if (wakeLockMode == WakeLockMode.ADAPTIVE && code in IBinder.FIRST_CALL_TRANSACTION..IBinder.LAST_CALL_TRANSACTION) {
-            wakeLock.touch("client", CLIENT_ACTIVITY_TTL_MS)
-        }
         if (code == ServerConstants.BINDER_TRANSACTION_getApplications) {
             data.enforceInterface(BINDER_DESCRIPTOR)
             val userId = data.readInt()
