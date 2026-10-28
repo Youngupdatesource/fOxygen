@@ -5,13 +5,16 @@ import android.os.SystemClock
 import android.util.Log
 import com.topjohnwu.superuser.Shell
 import frb.axeron.adb.util.AdbEnvironment
+import frb.axeron.api.Axeron
 import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.core.Starter
 import frb.axeron.manager.adb.AdbStarter
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Status "server seharusnya hidup" + logika restart bersama.
@@ -49,6 +52,27 @@ object ServerGuard {
             restartViaRoot()
         } else {
             restartViaAdbTcp(context)
+        }
+    }
+
+    /**
+     * Menunggu binder server tiba tanpa polling: satu callback + satu timer, bukan loop ping.
+     * Berguna saat job membangunkan proses manager dari kondisi mati, karena binder dari server
+     * yang sehat baru tiba beberapa saat kemudian.
+     */
+    suspend fun awaitBinder(timeoutMs: Long): Boolean {
+        if (Axeron.pingBinder()) return true
+
+        val ready = CompletableDeferred<Unit>()
+        val listener = Axeron.OnBinderReceivedListener { ready.complete(Unit) }
+        // Sticky: langsung terpanggil bila binder sudah siap saat dipasang.
+        Axeron.addBinderReceivedListenerSticky(listener)
+        try {
+            // Tutup celah antara cek pertama dan pemasangan listener.
+            if (Axeron.pingBinder()) ready.complete(Unit)
+            return withTimeoutOrNull(timeoutMs) { ready.await() } != null
+        } finally {
+            Axeron.removeBinderReceivedListener(listener)
         }
     }
 

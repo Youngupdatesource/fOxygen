@@ -4,8 +4,6 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import frb.axeron.api.Axeron
-import kotlinx.coroutines.delay
 
 /**
  * Pemulihan server setelah binder putus (lihat [ServerWatch]). Berjalan sebagai job sekali jalan:
@@ -25,8 +23,7 @@ class ServerRecoveryWorker(
 
         // Proses manager bisa dibangunkan job dari kondisi mati; binder server yang sehat tiba
         // beberapa saat kemudian. Sama seperti ServerHealthWorker, beri waktu sebelum menyimpulkan mati.
-        private const val BINDER_WAIT_TRIES = 10
-        private const val BINDER_WAIT_STEP_MS = 500L
+        private const val BINDER_WAIT_MS = 5_000L
 
         // Restart baru dikirim: server mungkin masih naik, jangan kirim lagi.
         private const val RECENT_RESTART_MS = 45_000L
@@ -36,10 +33,7 @@ class ServerRecoveryWorker(
         if (!ServerGuard.autoRestartEnabled) return Result.success()
         if (!ServerGuard.wasRunning) return Result.success()
 
-        repeat(BINDER_WAIT_TRIES) {
-            if (Axeron.pingBinder()) return Result.success()
-            delay(BINDER_WAIT_STEP_MS)
-        }
+        if (ServerGuard.awaitBinder(BINDER_WAIT_MS)) return Result.success()
 
         if (ServerGuard.restartedRecently(RECENT_RESTART_MS)) {
             Log.i(TAG, "restart masih berjalan, periksa lagi nanti")
