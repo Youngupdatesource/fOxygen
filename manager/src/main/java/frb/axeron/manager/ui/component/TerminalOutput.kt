@@ -5,6 +5,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.togetherWith
 import android.os.Build
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -600,22 +603,26 @@ fun <K : Any> TerminalOutput(
         AnimatedContent(
             targetState = topBar,
             transitionSpec = {
-                val origin = TransformOrigin(0.5f, 0f)
-                // The old bar is gone before the new one fades in: no overlap in between.
-                (fadeIn(tween(160, delayMillis = 90)) +
-                        scaleIn(tween(160, delayMillis = 90), initialScale = 0.92f, transformOrigin = origin))
+                // Cards on a deck: the next one is swiped up from below while the current one
+                // leaves upwards. They move one card height each, side by side, so they never
+                // overlap; the slot clips them (the bars carry their own padding for the shadow).
+                val slide = tween<IntOffset>(320, easing = FastOutSlowInEasing)
+                (slideInVertically(animationSpec = slide, initialOffsetY = { it }) +
+                        fadeIn(tween(220, delayMillis = 40)))
                     .togetherWith(
-                        fadeOut(tween(90)) + scaleOut(tween(90), targetScale = 0.92f, transformOrigin = origin)
+                        slideOutVertically(animationSpec = slide, targetOffsetY = { -it }) +
+                                fadeOut(tween(180))
                     )
-                    .using(SizeTransform(clip = false))
+                    .using(SizeTransform(clip = true))
             },
             contentAlignment = Alignment.TopCenter,
             label = "terminalTopBar",
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = contentPadding.calculateTopPadding())
-                .padding(horizontal = 4.dp)
+                .padding(top = (contentPadding.calculateTopPadding() - 6.dp).coerceAtLeast(0.dp))
         ) { bar ->
+            // Room around the card inside the clipped slot, so its shadow is not cut off.
+            Box(Modifier.padding(horizontal = 4.dp, vertical = 6.dp)) {
             when (bar) {
                 TopBar.Selection -> TerminalSelectionBar(
                     onCopy = { copySelection() },
@@ -643,6 +650,7 @@ fun <K : Any> TerminalOutput(
                 )
 
                 TopBar.None -> Box(Modifier.size(0.dp))
+            }
             }
         }
 

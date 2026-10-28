@@ -7,13 +7,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.animation.ObjectAnimator
-import android.provider.Settings
-import android.view.View
-import androidx.core.animation.doOnEnd
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.core.splashscreen.SplashScreenViewProvider
-import frb.axeron.manager.ui.component.SplashIntroHost
+import frb.axeron.manager.ui.component.StartupMotion
 import frb.axeron.manager.ui.component.riseIn
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -192,10 +187,6 @@ class AxActivity : ComponentActivity() {
 
         /** The longest the splash screen is kept waiting for the first screen. */
         private const val SPLASH_MAX_MS = 1000L
-
-        /** The intro plays once per process: not on a restart of the activity, not on reopening. */
-        @Volatile
-        private var introShown = false
     }
 
     override fun attachBaseContext(newBase: Context) {
@@ -228,29 +219,16 @@ class AxActivity : ComponentActivity() {
     @Volatile
     private var contentReady = false
 
-    /** True once the system splash is gone and the Compose intro (SplashIntroHost) may run. */
-    private var introStarted by mutableStateOf(false)
-
     override fun onCreate(savedInstanceState: Bundle?) {
-        // The intro is for a plain launch from the launcher: not for a restored activity, not for
-        // a shortcut or a zip being opened, and not when the user switched animations off.
-        val action = intent?.action
-        val animationsOn = Settings.Global.getFloat(
-            contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f
-        ) > 0f
-        val intro = savedInstanceState == null && !introShown && animationsOn &&
-            (action == null || action == Intent.ACTION_MAIN)
-
         // Before super.onCreate: swaps the splash theme for the app's (postSplashScreenTheme).
         installSplashScreen().apply {
             setKeepOnScreenCondition { !contentReady }
-            setOnExitAnimationListener { hideSystemSplash(it, intro) }
+            // No exit animation: the splash is gone the moment the first screen is there, and
+            // the entrance (riseIn) takes over from there.
+            setOnExitAnimationListener { it.remove() }
         }
         // The splash must never be able to hold the user behind a screen that does not come up.
-        val handler = Handler(Looper.getMainLooper())
-        handler.postDelayed({ contentReady = true }, SPLASH_MAX_MS)
-        // If the system never reports its splash gone, the intro still starts.
-        if (intro) handler.postDelayed({ introStarted = true }, SPLASH_MAX_MS + 600)
+        Handler(Looper.getMainLooper()).postDelayed({ contentReady = true }, SPLASH_MAX_MS)
 
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -265,29 +243,18 @@ class AxActivity : ComponentActivity() {
 
         setContent {
             AxManagerTheme { settings ->
-                SplashIntroHost(
-                    enabled = intro,
-                    started = introStarted,
-                    onFinished = { introShown = true }
-                ) {
-                    MainScreen(settings)
+                MainScreen(settings)
+                LaunchedEffect(Unit) {
+                    contentReady = true
+                    // The start-up entrance (see StartupMotion): the first screen's cards rise
+                    // in a moment after the splash has gone. Its window closes a little later;
+                    // a screen that shows up after that is simply there.
+                    delay(150L)
+                    StartupMotion.revealed = true
+                    delay(2500L)
+                    StartupMotion.played = true
                 }
-                LaunchedEffect(Unit) { contentReady = true }
             }
-        }
-    }
-
-    /**
-     * The system splash only has to melt away. With the intro, SplashIntroHost already draws the
-     * same icon in the same place underneath (same circle, same colour), so a short fade is
-     * invisible and the intro carries on from there; without it a slightly longer fade is used.
-     */
-    private fun hideSystemSplash(provider: SplashScreenViewProvider, intro: Boolean) {
-        if (intro) introStarted = true
-        ObjectAnimator.ofFloat(provider.view, View.ALPHA, 1f, 0f).apply {
-            duration = if (intro) 140L else 220L
-            doOnEnd { provider.remove() }
-            start()
         }
     }
 

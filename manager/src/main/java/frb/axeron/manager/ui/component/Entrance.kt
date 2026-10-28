@@ -15,12 +15,11 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
 /**
- * The cue that ties the app's first screen to the splash intro (see [SplashIntroHost]).
+ * The cue for the app's first screen entrance, after the splash.
  *
  * Until [revealed] the things marked with [riseIn] wait out of sight, just below where they
- * belong; the host flips it when the intro's iris starts to open (or a moment after the system
- * splash if there is no intro), and they rise into place one after another, so what the iris
- * uncovers is already on its way up.
+ * belong; AxActivity flips it a moment after the system splash is gone, and they rise into
+ * place one after another.
  */
 object StartupMotion {
     /** True from the moment the first screen should start to come in. */
