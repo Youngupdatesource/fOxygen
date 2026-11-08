@@ -7,7 +7,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import frb.axeron.manager.ui.component.BannerFrameCache
 import frb.axeron.manager.ui.component.StartupMotion
 import frb.axeron.manager.ui.component.riseIn
 import androidx.lifecycle.lifecycleScope
@@ -187,7 +189,21 @@ class AxActivity : ComponentActivity() {
 
         /** The longest the splash screen is kept waiting for the first screen. */
         private const val SPLASH_MAX_MS = 1000L
+
+        /**
+         * The longest the splash screen is kept waiting for the saved banner stills to be read
+         * back (normally a few dozen ms), so the banners are there on the very first frame.
+         */
+        private const val BANNER_PRELOAD_MAX_MS = 350L
+
+        /** Back from the background after at least this long = the entrance plays again. */
+        private const val REPLAY_AFTER_BACKGROUND_MS = 3000L
+
+        /** False until the first AxActivity of this process has been created. */
+        private var createdInThisProcess = false
     }
+
+    private var stoppedAt = 0L
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(LocaleHelper.applyLanguage(newBase))
@@ -220,9 +236,22 @@ class AxActivity : ComponentActivity() {
     private var contentReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The entrance is played whenever the app is opened (a new process, or a new window with
+        // no saved state); a window that is only recreated by a rotation / theme change has
+        // nothing to replay: everything is simply there.
+        val firstInProcess = !createdInThisProcess
+        createdInThisProcess = true
+        if (firstInProcess || savedInstanceState == null) StartupMotion.begin()
+        else StartupMotion.skip()
+
+        val preloadDeadline = SystemClock.uptimeMillis() + BANNER_PRELOAD_MAX_MS
+
         // Before super.onCreate: swaps the splash theme for the app's (postSplashScreenTheme).
         installSplashScreen().apply {
-            setKeepOnScreenCondition { !contentReady }
+            setKeepOnScreenCondition {
+                !contentReady ||
+                    (!BannerFrameCache.preloaded && SystemClock.uptimeMillis() < preloadDeadline)
+            }
             // No exit animation: the splash is gone the moment the first screen is there, and
             // the entrance (riseIn) takes over from there.
             setOnExitAnimationListener { it.remove() }
@@ -244,18 +273,37 @@ class AxActivity : ComponentActivity() {
         setContent {
             AxManagerTheme { settings ->
                 MainScreen(settings)
-                LaunchedEffect(Unit) {
+                // Restarts whenever a new entrance begins (StartupMotion.session), so it plays
+                // on whichever tab the app opens on, every time it is opened.
+                val session = StartupMotion.session
+                LaunchedEffect(session) {
                     contentReady = true
-                    // The start-up entrance (see StartupMotion): the first screen's cards rise
+                    if (StartupMotion.played) return@LaunchedEffect // skip(): nothing to play
+                    // The start-up entrance (see StartupMotion): the visible tab's cards rise
                     // in a moment after the splash has gone. Its window closes a little later;
                     // a screen that shows up after that is simply there.
                     delay(150L)
                     StartupMotion.revealed = true
                     delay(2500L)
                     StartupMotion.played = true
+                    StartupMotion.settled = true
                 }
             }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        stoppedAt = SystemClock.elapsedRealtime()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Opened again from the background (the process was still alive): the entrance plays
+        // again, like on a fresh start, after a real absence and not a quick app switch.
+        val away = if (stoppedAt == 0L) 0L else SystemClock.elapsedRealtime() - stoppedAt
+        stoppedAt = 0L
+        if (away >= REPLAY_AFTER_BACKGROUND_MS && StartupMotion.played) StartupMotion.begin()
     }
 
     override fun onNewIntent(intent: Intent) {

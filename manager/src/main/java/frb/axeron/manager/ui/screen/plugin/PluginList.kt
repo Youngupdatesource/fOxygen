@@ -32,6 +32,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import frb.axeron.manager.ui.component.riseIn
+import androidx.compose.foundation.lazy.itemsIndexed
 import frb.axeron.manager.ui.util.LocalCapsuleInset
 import frb.axeron.api.AxeronPluginService
 import frb.axeron.manager.AxeronApplication.Companion.axeronApp
@@ -244,7 +246,7 @@ fun PluginList(
                 }
 
                 else -> {
-                    items(viewModel.pluginList) { plugin ->
+                    itemsIndexed(viewModel.pluginList) { index, plugin ->
                         val scope = rememberCoroutineScope()
                         val updatedModule by produceState(
                             key1 = plugin.prop.id,
@@ -255,6 +257,8 @@ fun PluginList(
                             }
                         }
 
+                        // Rises in on the app's entrance, like the cards on Home (first cards only).
+                        Box(Modifier.riseIn(index = index.coerceAtMost(6), distance = 40.dp)) {
                         PluginItem(
                             navigator = navigator,
                             settings = settings,
@@ -307,6 +311,7 @@ fun PluginList(
                                     if (viewModel.expandedPluginId == plugin.prop.id) null else plugin.prop.id
                             }
                         )
+                        }
 
                         Spacer(Modifier.height(1.dp))
                     }

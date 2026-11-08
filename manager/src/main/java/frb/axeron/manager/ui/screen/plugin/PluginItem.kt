@@ -73,7 +73,10 @@ import coil.compose.AsyncImage
 import frb.axeron.manager.ui.component.CachedBannerImage
 import frb.axeron.manager.ui.component.PluginBannerBytes
 import frb.axeron.manager.ui.component.pluginBannerKey
-import frb.axeron.manager.ui.component.readPluginBannerBytes
+import frb.axeron.manager.ui.component.loadPluginBannerBytes
+import frb.axeron.manager.ui.component.StartupMotion
+import frb.axeron.manager.ui.component.hasBannerFrame
+import frb.axeron.manager.ui.navigation.navigateOnce
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.produceState
@@ -391,18 +394,25 @@ fun PluginItem(
                     val bannerKey = pluginBannerKey(plugin)
                     // Baca file banner sekali, di luar main thread, dan simpan di memori proses.
                     // Sebelumnya dibaca lewat Binder di main thread setiap item masuk komposisi.
+                    // Selama animasi masuk app belum selesai dan frame diam banner sudah ada,
+                    // file/GIF belum disentuh: frame diam cukup, banner bergerak menyusul.
+                    val settled = StartupMotion.settled
+                    val wantLive = settled || !hasBannerFrame(bannerKey)
                     val bannerData by produceState<Any?>(
-                        initialValue = if (isRemote) plugin.prop.banner
-                        else PluginBannerBytes.get(bannerKey),
-                        bannerKey
+                        initialValue = when {
+                            !wantLive -> null
+                            isRemote -> plugin.prop.banner
+                            else -> PluginBannerBytes.get(bannerKey)
+                        },
+                        bannerKey,
+                        wantLive
                     ) {
-                        if (isRemote) {
+                        if (!wantLive) {
+                            value = null
+                        } else if (isRemote) {
                             value = plugin.prop.banner
                         } else if (value == null) {
-                            value = withContext(Dispatchers.IO) {
-                                readPluginBannerBytes(plugin)
-                                    ?.also { PluginBannerBytes.put(bannerKey, it) }
-                            }
+                            value = loadPluginBannerBytes(plugin)
                         }
                     }
                     CachedBannerImage(
@@ -676,7 +686,7 @@ fun PluginItem(
                                     modifier = Modifier.defaultMinSize(52.dp, 32.dp),
                                     enabled = !plugin.remove && plugin.enabled && !plugin.update,
                                     onClick = {
-                                        navigator!!.navigate(
+                                        navigator!!.navigateOnce(
                                             ExecutePluginActionScreenDestination(plugin)
                                         )
                                         viewModel.markNeedRefresh()

@@ -9,12 +9,14 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
+import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.topjohnwu.superuser.Shell
 import frb.axeron.Axerish
 import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.core.Engine
 import frb.axeron.manager.service.ServerWatch
+import frb.axeron.manager.ui.component.BannerFrameCache
 import frb.axeron.manager.ui.util.ThrottledAppIconFetcher
 import frb.axeron.manager.ui.util.createShellBuilder
 import me.zhanghai.android.appiconloader.coil.AppIconKeyer
@@ -27,6 +29,7 @@ import java.util.Locale
 class AxeronApplication : Engine(), ImageLoaderFactory {
     companion object {
         private const val ICON_MEMORY_CACHE_BYTES = 16 * 1024 * 1024
+        private const val IMAGE_DISK_CACHE_BYTES = 48L * 1024 * 1024
 
         lateinit var axeronApp: AxeronApplication
 
@@ -54,6 +57,9 @@ class AxeronApplication : Engine(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        // Starts reading the banner stills saved by the last run back into memory, in the
+        // background, so Home and the Plugins tab do not open with blank banners.
+        BannerFrameCache.preload(this)
         ServerWatch.start(this)
     }
 
@@ -84,7 +90,15 @@ class AxeronApplication : Engine(), ImageLoaderFactory {
                     .maxSizeBytes(ICON_MEMORY_CACHE_BYTES)
                     .build()
             }
-            .diskCache(null)
+            // Remote banners (plugin banner URLs) were downloaded again on every cold start, and
+            // stayed blank until they arrived. Local files and in-memory banners never use this.
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(File(cacheDir, "coil_images"))
+                    .maxSizeBytes(IMAGE_DISK_CACHE_BYTES)
+                    .build()
+            }
+            .respectCacheHeaders(false)
             .build()
     }
 

@@ -32,6 +32,8 @@ import frb.axeron.manager.ui.component.AppIcon
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import frb.axeron.manager.ui.component.riseIn
+import androidx.compose.foundation.lazy.itemsIndexed
 import frb.axeron.manager.R
 import frb.axeron.manager.ui.component.RoundedCheckbox
 import frb.axeron.manager.ui.component.SearchAppBar
@@ -169,15 +171,17 @@ fun PrivilegeScreen(
                     bottom = LocalCapsuleInset.current + 16.dp
                 )
             ) {
-                items(
+                itemsIndexed(
                     keyedList,
-                    key = { it.key },
-                    contentType = { "privilege_app" }
-                ) { keyed ->
+                    key = { _, it -> it.key },
+                    contentType = { _, _ -> "privilege_app" }
+                ) { index, keyed ->
                     val app = keyed.app
                     ListItem(
                         modifier = Modifier
                             .animateItem()
+                            // Rises in on the app's entrance (first rows only; later ones just appear).
+                            .riseIn(index = index.coerceAtMost(8), distance = 32.dp)
                             .padding(end = 6.dp, top = 6.dp),
                         headlineContent = {
                             Text(

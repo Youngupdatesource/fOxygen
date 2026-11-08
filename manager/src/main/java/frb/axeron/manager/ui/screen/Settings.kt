@@ -77,6 +77,8 @@ import com.ramcosta.composedestinations.generated.destinations.DeveloperScreenDe
 import com.ramcosta.composedestinations.generated.destinations.FlashScreenDestination
 import com.ramcosta.composedestinations.generated.destinations.SettingsEditorScreenDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import frb.axeron.manager.ui.navigation.navigateOnce
+import frb.axeron.manager.ui.component.riseIn
 import frb.axeron.manager.ui.util.LocalTabScrollStates
 import frb.axeron.manager.ui.util.LocalCapsuleInset
 import frb.axeron.adb.util.AdbEnvironment
@@ -154,7 +156,10 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
 
-            AnimatedVisibility(visible = axeronRunning) {
+            // Each child rises in on the app's entrance (riseIn), like on Home. SettingsItem has
+            // no modifier, so it sits in a Box (one child: the layout does not change);
+            // AnimatedVisibility takes riseIn as its own modifier.
+            AnimatedVisibility(visible = axeronRunning, modifier = Modifier.riseIn(0)) {
                 val lifecycleOwner = rememberLifecycleOwner()
                 DisposableEffect(Unit) {
                     val observer = object : androidx.lifecycle.DefaultLifecycleObserver {
@@ -178,6 +183,7 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                 )
             }
 
+            Box(Modifier.riseIn(1)) {
             SettingsItem(
                 iconVector = Icons.Filled.Adb,
                 label = stringResource(R.string.tcp_mode),
@@ -280,6 +286,9 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                 }
             }
 
+            } // riseIn(1)
+
+            Box(Modifier.riseIn(2)) {
             SettingsItem(
                 iconVector = Icons.Filled.RestartAlt,
                 label = stringResource(R.string.active_on_boot),
@@ -289,8 +298,9 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                     settings.setActivateOnBoot(it)
                 }
             )
+            }
 
-
+            Box(Modifier.riseIn(3)) {
             SettingsItem(
                 iconVector = Icons.Filled.Refresh,
                 label = stringResource(R.string.ignite_when_relog),
@@ -300,8 +310,9 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                     settings.setIgniteWhenRelog(it)
                 }
             )
+            }
 
-            AnimatedVisibility(visible = axeronRunning) {
+            AnimatedVisibility(visible = axeronRunning, modifier = Modifier.riseIn(4)) {
                 val title = stringResource(R.string.ask_reset_path)
                 val content = stringResource(R.string.ask_reset_path_desc)
                 val confirm = stringResource(R.string.reset)
@@ -322,13 +333,14 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                                 dismiss = dismiss
                             )
                             if (confirmResult == ConfirmResult.Confirmed) {
-                                navigator.navigate(FlashScreenDestination(FlashIt.FlashUninstall))
+                                navigator.navigateOnce(FlashScreenDestination(FlashIt.FlashUninstall))
                             }
                         }
                     }
                 )
             }
 
+            Box(Modifier.riseIn(5)) {
             SettingsItem { _, _ ->
 //                AnimatedVisibility(visible = axeronRunning) {
 //                    SettingsItem(
@@ -347,7 +359,7 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                         iconVector = Icons.Filled.Edit,
                         label = stringResource(R.string.settings_editor),
                         onClick = {
-                            navigator.navigate(SettingsEditorScreenDestination)
+                            navigator.navigateOnce(SettingsEditorScreenDestination)
                         }
                     )
                 }
@@ -357,7 +369,7 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                     iconVector = Icons.Filled.Palette,
                     label = stringResource(R.string.appearance),
                     onClick = {
-                        navigator.navigate(AppearanceScreenDestination)
+                        navigator.navigateOnce(AppearanceScreenDestination)
                     }
                 )
 
@@ -366,11 +378,12 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                     iconVector = Icons.Filled.BugReport,
                     label = stringResource(R.string.developer),
                     onClick = {
-                        navigator.navigate(DeveloperScreenDestination)
+                        navigator.navigateOnce(DeveloperScreenDestination)
                     }
                 )
 
             }
+            } // riseIn(5)
         }
     }
 }

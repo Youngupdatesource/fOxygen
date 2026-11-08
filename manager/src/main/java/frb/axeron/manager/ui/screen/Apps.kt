@@ -50,6 +50,7 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.AddAppsScreenDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import frb.axeron.manager.ui.navigation.navigateOnce
 import frb.axeron.manager.ui.component.SearchAppBar
 import frb.axeron.manager.ui.viewmodel.ViewModelGlobal
 
@@ -106,7 +107,7 @@ fun AppsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGloba
                     Icon(Icons.Filled.Add, contentDescription = "Add App")
                 },
                 onClick = {
-                    navigator.navigate(AddAppsScreenDestination)
+                    navigator.navigateOnce(AddAppsScreenDestination)
                 })
             }
         },

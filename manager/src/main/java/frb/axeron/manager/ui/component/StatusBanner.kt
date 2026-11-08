@@ -202,8 +202,12 @@ fun StatusBannerImage(file: File, modifier: Modifier = Modifier) {
 
     // Cache frame terakhir + ukuran area: banner langsung tergambar di frame pertama saat tab
     // dibuka lagi (geser Home <-> Privileges), tidak lagi kosong lalu muncul (kedip).
+    // Kunci mengikuti file banner (bukan counter di memori): frame juga disimpan ke disk dan
+    // dibaca lagi saat app dibuka dari nol, jadi kunci harus tetap sama antar proses dan
+    // berubah begitu banner diganti.
+    val cacheKey = remember(file, version) { "status_banner:${file.lastModified()}:${file.length()}" }
     CachedBannerImage(
-        cacheKey = "status_banner:$version",
+        cacheKey = cacheKey,
         model = file,
         modifier = modifier,
         alignment = BiasAlignment(BannerStore.focusX * 2f - 1f, BannerStore.focusY * 2f - 1f),

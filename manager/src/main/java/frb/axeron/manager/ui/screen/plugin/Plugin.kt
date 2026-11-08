@@ -59,6 +59,7 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.FlashScreenDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import frb.axeron.manager.ui.navigation.navigateOnce
 import frb.axeron.manager.ui.util.LocalTabScrollStates
 import frb.axeron.manager.ui.util.LocalCapsuleInset
 import frb.axeron.api.AxeronPluginService
@@ -172,7 +173,7 @@ fun PluginScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGlo
 
                     pluginViewModel.updateZipUris(installers)
 
-                    navigator.navigate(FlashScreenDestination(FlashIt.FlashPlugins(installers)))
+                    navigator.navigateOnce(FlashScreenDestination(FlashIt.FlashPlugins(installers)))
                     pluginViewModel.clearZipUris()
                     pluginViewModel.markNeedRefresh()
                 }
@@ -249,7 +250,7 @@ fun PluginScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGlo
             viewModel = pluginViewModel,
             modifier = Modifier.padding(paddingValues),
             onInstallModule = {
-                navigator.navigate(
+                navigator.navigateOnce(
                     FlashScreenDestination(
                         FlashIt.FlashPlugins(
                             listOf(

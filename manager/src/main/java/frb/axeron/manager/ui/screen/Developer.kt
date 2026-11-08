@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import frb.axeron.manager.ui.util.LocalCapsuleInset
 import frb.axeron.manager.R
@@ -47,7 +48,7 @@ fun DeveloperScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModel
     Scaffold(
         topBar = {
             TopBar(
-                onBack = { navigator.popBackStack() },
+                onBack = dropUnlessResumed { navigator.popBackStack() },
                 scrollBehavior = scrollBehavior
             )
         },

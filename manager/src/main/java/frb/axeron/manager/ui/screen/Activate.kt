@@ -66,6 +66,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import frb.axeron.adb.AdbPairingService
 import frb.axeron.adb.util.AdbEnvironment
@@ -110,7 +111,7 @@ fun ActivateScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navigator.popBackStack() }) {
+                    IconButton(onClick = dropUnlessResumed { navigator.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }

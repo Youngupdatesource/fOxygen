@@ -12,7 +12,13 @@ import frb.axeron.server.PluginInfo
 import frb.axeron.shared.AxeronApiConstant
 import frb.axeron.shared.PathHelper
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -58,6 +64,37 @@ internal fun readPluginBannerBytes(plugin: PluginInfo): ByteArray? = try {
     null
 }
 
+private val bannerReadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+private val bannerReadsInFlight = HashMap<String, Deferred<ByteArray?>>()
+
+// Binder reads go to the server one after another, never as a burst.
+private val bannerReadGate = Semaphore(2)
+
+/**
+ * A plugin banner's bytes, read at most once even when the prefetch and the card ask for the same
+ * file at the same time (they used to read it twice, each over Binder, right when the Plugins tab
+ * is also busy coming up). The read is shared, so one caller leaving does not cancel it.
+ */
+internal suspend fun loadPluginBannerBytes(plugin: PluginInfo): ByteArray? {
+    val key = pluginBannerKey(plugin)
+    PluginBannerBytes.get(key)?.let { return it }
+    val read = synchronized(bannerReadsInFlight) {
+        bannerReadsInFlight.getOrPut(key) {
+            bannerReadScope.async {
+                try {
+                    bannerReadGate.withPermit {
+                        PluginBannerBytes.get(key)
+                            ?: readPluginBannerBytes(plugin)?.also { PluginBannerBytes.put(key, it) }
+                    }
+                } finally {
+                    synchronized(bannerReadsInFlight) { bannerReadsInFlight.remove(key) }
+                }
+            }
+        }
+    }
+    return read.await()
+}
+
 private const val MAX_FRAME_EDGE = 720
 
 /** Warms [BannerFrameCache] with one still frame per plugin banner. Safe to call repeatedly. */
@@ -95,9 +132,7 @@ private suspend fun loadFrame(context: Context, plugin: PluginInfo, key: String)
         val result = context.imageLoader.execute(request)
         return (result as? SuccessResult)?.drawable?.toBitmap()
     }
-    val bytes = PluginBannerBytes.get(key)
-        ?: readPluginBannerBytes(plugin)?.also { PluginBannerBytes.put(key, it) }
-        ?: return null
+    val bytes = loadPluginBannerBytes(plugin) ?: return null
     return decodeSampled(bytes)
 }
 

@@ -93,6 +93,7 @@ import com.ramcosta.composedestinations.generated.destinations.PluginScreenDesti
 import com.ramcosta.composedestinations.generated.NavGraphs
 import com.ramcosta.composedestinations.generated.destinations.QuickShellScreenDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import frb.axeron.manager.ui.navigation.navigateOnce
 import frb.axeron.manager.ui.util.LocalTabScrollStates
 import frb.axeron.manager.ui.util.LocalCapsuleInset
 import frb.axeron.api.Axeron
@@ -231,7 +232,7 @@ fun HomeScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGloba
             ) {
                 FloatingActionButton(
                     onClick = {
-                        navigator.navigate(QuickShellScreenDestination)
+                        navigator.navigateOnce(QuickShellScreenDestination)
                     }
                 ) {
                     Icon(Icons.Filled.Terminal, null)
@@ -256,7 +257,7 @@ fun HomeScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGloba
                     activateViewModel = activateViewModel
                 ) {
                     if (!it) {
-                        navigator.navigate(ActivateScreenDestination)
+                        navigator.navigateOnce(ActivateScreenDestination)
                     }
                 }
             }

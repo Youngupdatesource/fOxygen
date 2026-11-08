@@ -59,6 +59,7 @@ import com.maxkeppeler.sheets.list.models.ListOption
 import com.maxkeppeler.sheets.list.models.ListSelection
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
+import androidx.lifecycle.compose.dropUnlessResumed
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import frb.axeron.manager.ui.util.LocalCapsuleInset
 import frb.axeron.api.core.AxeronSettings
@@ -85,7 +86,7 @@ fun AppearanceScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewMode
     Scaffold(
         topBar = {
             TopBar(
-                onBack = { navigator.popBackStack() },
+                onBack = dropUnlessResumed { navigator.popBackStack() },
                 scrollBehavior = scrollBehavior
             )
         },
