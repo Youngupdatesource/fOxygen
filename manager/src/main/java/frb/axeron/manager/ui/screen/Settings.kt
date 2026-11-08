@@ -193,7 +193,8 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
                     settings.setTcpMode(it)
                 }
             ) { enabled, checked ->
-                AnimatedVisibility(checked) {
+                // Inside the riseIn Box the nearest scope is BoxScope: the Column's is named.
+                this@Column.AnimatedVisibility(checked) {
                     SettingsItem(
                         type = SettingsItemType.CHILD
                     ) { _, _ ->
@@ -353,7 +354,7 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
 //                    )
 //                }
 
-                AnimatedVisibility(visible = axeronRunning) {
+                this@Column.AnimatedVisibility(visible = axeronRunning) {
                     SettingsItem(
                         type = SettingsItemType.CHILD,
                         iconVector = Icons.Filled.Edit,
