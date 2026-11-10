@@ -647,7 +647,7 @@ class AxActivity : ComponentActivity() {
                     return@enter EnterTransition.None
                 }
                 val targetRoute = targetState.destination.route
-                // Tab -> tab by tap or link: the cards of the new tab rise in again (riseIn).
+                // Tab -> tab by tap or link: the new tab plays the same entrance as at app start.
                 if (targetRoute in bottomBarRoutes && initialState.destination.route in bottomBarRoutes) {
                     StartupMotion.markTabSwitch()
                 }

@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -59,7 +60,7 @@ object StartupMotion {
     /**
      * A tab was just opened by a tap or a link (not by swiping). Called by the navigation
      * transition, just before the new tab composes: cards that appear within the next moment rise
-     * in again, lighter and quicker than at start-up.
+     * in again, with the same entrance as at start-up.
      */
     internal fun markTabSwitch() {
         tabSwitchUntil = SystemClock.uptimeMillis() + TAB_SWITCH_WINDOW_MS
@@ -90,32 +91,38 @@ object StartupMotion {
 
 private const val BASE_DELAY_MS = 90L
 
-// Opening a tab by tap/link: lighter and quicker than the start-up entrance.
+// A tab opened by tap/link counts as "just opened" for this long.
 private const val TAB_SWITCH_WINDOW_MS = 450L
-private const val TAB_BASE_DELAY_MS = 30L
-private const val TAB_STEP_MS = 35L
-private const val TAB_DISTANCE_FACTOR = 0.5f
 
 /**
  * Set only inside the neighbouring-tab preview that follows the finger while swiping between
- * tabs: how far that tab has come in, 0f..1f (1f once it has landed). The cards then follow the
- * finger instead of running a timer, so nothing replays when the preview is handed over to the
- * real tab and nothing is decoded or animated twice.
+ * tabs: how far that tab has come in, 0f..1f (1f once it has landed). The cards then play the
+ * same entrance, but driven by the finger instead of a timer, so nothing replays when the
+ * preview is handed over to the real tab.
  */
 val LocalTabDragEntrance = compositionLocalOf<(() -> Float)?> { null }
 
+/** One look for the entrance everywhere: the same at start-up, on a tab switch and in the swipe. */
+private fun GraphicsLayerScope.applyRise(p: Float, distance: Dp) {
+    alpha = (p * 2f).coerceIn(0f, 1f) // fully there by the time it is half way up
+    translationY = (1f - p) * distance.toPx()
+    val s = 0.97f + 0.03f * p.coerceIn(0f, 1f)
+    scaleX = s
+    scaleY = s
+}
+
 /**
- * Rises into place: on the start-up entrance (each time the app is opened) and each time a tab is
- * opened by tap or link, and, in the swipe preview, along with the finger.
+ * Rises into place: from [distance] below, fading in and settling from a slightly smaller size,
+ * [index] steps after the first. A spring with a little give carries it the last bit, so it lands
+ * rather than stops. It is the app's entrance, and it plays everywhere the same way:
  *
- * - Start-up: from [distance] below, fading in and settling from a slightly smaller size,
- *   [index] steps after the first. A spring with a little give carries it the last bit.
- * - Tab opened by tap/link: the same, but half the distance, a short delay and a stiffer spring,
- *   so it reads as a quick settle while the page slides in.
- * - Swipe preview: only a small vertical offset that follows how far the tab has come in
- *   (no timers, no fading: the peek stays fully visible and costs next to nothing per frame).
- * - Anything else (a swipe handed over to the real tab, a screen that simply shows up): in place.
+ * - when the app is opened (on whichever tab it opens on),
+ * - when a tab is opened by tap or link,
+ * - while swiping between tabs: the preview plays the same entrance, driven by how far the
+ *   finger has brought the tab in (no timer), and the real tab, once handed over, is simply in
+ *   place, so nothing replays.
  *
+ * A screen that just shows up otherwise (back from a sub-screen, say) starts in place.
  * It wraps exactly one thing, so putting it on a Box around a card does not change the layout.
  */
 @Composable
@@ -139,8 +146,7 @@ private fun Modifier.riseInFollowingFinger(
     distance: Dp,
 ): Modifier = this.graphicsLayer {
     // Lower cards catch up a little later; at 1f everything is exactly in place.
-    val p = (entrance() * 1.25f - index * 0.05f).coerceIn(0f, 1f)
-    translationY = (1f - p) * distance.toPx() * 0.4f
+    applyRise((entrance() * 1.25f - index * 0.05f).coerceIn(0f, 1f), distance)
 }
 
 @Composable
@@ -166,34 +172,15 @@ private fun Modifier.riseInOnTimer(
             ownSession = session
         }
         if (revealed && progress.value < 1f) {
-            if (tabSwitch && StartupMotion.played) {
-                delay(TAB_BASE_DELAY_MS + index * TAB_STEP_MS)
-                progress.animateTo(
-                    targetValue = 1f,
-                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 380f)
-                )
-            } else {
-                delay(BASE_DELAY_MS + index * stepMs)
-                progress.animateTo(
-                    targetValue = 1f,
-                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f)
-                )
-            }
+            delay(BASE_DELAY_MS + index * stepMs)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f)
+            )
         }
     }
 
     return this.graphicsLayer {
-        val p = if (StartupMotion.session != ownSession) 0f else progress.value
-        if (tabSwitch && StartupMotion.played) {
-            // Quick settle: never fully hidden, so the page sliding in is not an empty page.
-            alpha = (0.4f + p * 1.2f).coerceIn(0f, 1f)
-            translationY = (1f - p) * distance.toPx() * TAB_DISTANCE_FACTOR
-        } else {
-            alpha = (p * 2f).coerceIn(0f, 1f) // fully there by the time it is half way up
-            translationY = (1f - p) * distance.toPx()
-            val s = 0.97f + 0.03f * p.coerceIn(0f, 1f)
-            scaleX = s
-            scaleY = s
-        }
+        applyRise(if (StartupMotion.session != ownSession) 0f else progress.value, distance)
     }
 }
