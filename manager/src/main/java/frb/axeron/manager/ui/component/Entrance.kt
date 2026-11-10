@@ -57,14 +57,27 @@ object StartupMotion {
     @Volatile
     private var tabSwitchUntil = 0L
 
+    @Volatile
+    private var lastTabSwitchAt = 0L
+
+    @Volatile
+    private var tabSwitchInBurst = false
+
     /**
      * A tab was just opened by a tap or a link (not by swiping). Called by the navigation
      * transition, just before the new tab composes: cards that appear within the next moment rise
      * in again, with the same entrance as at start-up.
      */
     internal fun markTabSwitch() {
-        tabSwitchUntil = SystemClock.uptimeMillis() + TAB_SWITCH_WINDOW_MS
+        val now = SystemClock.uptimeMillis()
+        // Tabs being switched one right after another (spamming the capsule): the entrances
+        // overlap, so each one is compressed (see riseIn) instead of restarting from empty.
+        tabSwitchInBurst = now - lastTabSwitchAt < TAB_BURST_MS
+        lastTabSwitchAt = now
+        tabSwitchUntil = now + TAB_SWITCH_WINDOW_MS
     }
+
+    internal fun tabSwitchIsBurst(): Boolean = tabSwitchInBurst
 
     /** A swipe handoff or anything else that must not replay: cards just appear in place. */
     internal fun clearTabSwitch() {
@@ -91,8 +104,17 @@ object StartupMotion {
 
 private const val BASE_DELAY_MS = 90L
 
-// A tab opened by tap/link counts as "just opened" for this long.
-private const val TAB_SWITCH_WINDOW_MS = 450L
+// A tab opened by tap/link counts as "just opened" for this long (generous: the first
+// composition of a heavy tab can take a while, and it must still count).
+private const val TAB_SWITCH_WINDOW_MS = 900L
+
+// A tab switch this soon after the previous one is part of a burst (rapid switching).
+private const val TAB_BURST_MS = 700L
+
+// In a burst each card starts already part of the way in, so a tab that is switched away from
+// again almost at once never shows up empty, and the cards settle together, not one by one.
+private const val BURST_START_PROGRESS = 0.5f
+private const val BURST_STEP_MS = 12L
 
 /**
  * Set only inside the neighbouring-tab preview that follows the finger while swiping between
@@ -160,7 +182,16 @@ private fun Modifier.riseInOnTimer(
     // Opened by tap/link after the start-up entrance: decided once, when this card first
     // composes (the navigation transition marks it just before that).
     val tabSwitch = remember { StartupMotion.played && StartupMotion.tabSwitchActive() }
-    val progress = remember { Animatable(if (StartupMotion.played && !tabSwitch) 1f else 0f) }
+    val burst = remember { tabSwitch && StartupMotion.tabSwitchIsBurst() }
+    val progress = remember {
+        Animatable(
+            when {
+                burst -> BURST_START_PROGRESS
+                StartupMotion.played && !tabSwitch -> 1f
+                else -> 0f
+            }
+        )
+    }
     // The session this item's progress belongs to. When a newer session starts (the app was
     // opened again) the item is hidden at once, in the very same frame, and the effect below
     // winds its progress back to 0 and lets it rise in again.
@@ -172,11 +203,22 @@ private fun Modifier.riseInOnTimer(
             ownSession = session
         }
         if (revealed && progress.value < 1f) {
-            delay(BASE_DELAY_MS + index * stepMs)
-            progress.animateTo(
-                targetValue = 1f,
-                animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f)
-            )
+            if (burst && StartupMotion.played) {
+                // Parallel entrances: every card is its own animation on its own Animatable, so
+                // switching tabs again only abandons the cards that went away and the new tab's
+                // cards run alongside them: compressed, with a short stagger and a firmer spring.
+                delay(index * BURST_STEP_MS)
+                progress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f)
+                )
+            } else {
+                delay(BASE_DELAY_MS + index * stepMs)
+                progress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f)
+                )
+            }
         }
     }
 
