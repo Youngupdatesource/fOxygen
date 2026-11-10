@@ -107,6 +107,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.max
 import frb.axeron.manager.ui.component.LocalBannerAnimationAllowed
+import frb.axeron.manager.ui.component.LocalTabDragEntrance
 import frb.axeron.manager.ui.screen.HomeScreen
 import frb.axeron.manager.ui.screen.PrivilegeScreen
 import frb.axeron.manager.ui.screen.SettingsScreen
@@ -471,6 +472,13 @@ class AxActivity : ComponentActivity() {
             }
         }
         val previewTab = swipe.hold ?: dragNeighbor
+        // How far the preview tab has come in (0f..1f): its cards follow the finger with it.
+        val previewEntrance = remember(swipe) {
+            {
+                if (swipe.hold != null || swipe.width <= 0f) 1f
+                else (abs(swipe.offsetPx) / swipe.width).coerceIn(0f, 1f)
+            }
+        }
         val blockTouches by remember {
             derivedStateOf { swipe.hold != null || swipe.offsetPx != 0f || swipe.settling }
         }
@@ -560,7 +568,7 @@ class AxActivity : ComponentActivity() {
                                         }
                                     }
                             ) {
-                                TabPreview(tab, navigator, viewModelGlobal)
+                                TabPreview(tab, navigator, viewModelGlobal, previewEntrance)
                             }
                         }
 
@@ -601,10 +609,15 @@ class AxActivity : ComponentActivity() {
     private fun TabPreview(
         tab: BottomBarDestination,
         navigator: DestinationsNavigator,
-        viewModelGlobal: ViewModelGlobal
+        viewModelGlobal: ViewModelGlobal,
+        entrance: () -> Float
     ) {
-        // A peek under a moving page: still frames only, no GIF decoding while swiping.
-        CompositionLocalProvider(LocalBannerAnimationAllowed provides false) {
+        // A peek under a moving page: still frames only, no GIF decoding while swiping; the
+        // cards' rise follows the finger (entrance) instead of running on a timer.
+        CompositionLocalProvider(
+            LocalBannerAnimationAllowed provides false,
+            LocalTabDragEntrance provides entrance
+        ) {
             when (tab) {
                 BottomBarDestination.Home -> HomeScreen(navigator, viewModelGlobal)
                 BottomBarDestination.Privilege -> PrivilegeScreen(navigator, viewModelGlobal)
@@ -628,8 +641,16 @@ class AxActivity : ComponentActivity() {
 
         return object : NavHostAnimatedDestinationStyle() {
             override val enterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = enter@{
-                if (skip()) return@enter EnterTransition.None
+                if (skip()) {
+                    // Swipe handoff: the finger already did the entrance, nothing to replay.
+                    StartupMotion.clearTabSwitch()
+                    return@enter EnterTransition.None
+                }
                 val targetRoute = targetState.destination.route
+                // Tab -> tab by tap or link: the cards of the new tab rise in again (riseIn).
+                if (targetRoute in bottomBarRoutes && initialState.destination.route in bottomBarRoutes) {
+                    StartupMotion.markTabSwitch()
+                }
                 if (targetRoute !in bottomBarRoutes) {
                     slideInHorizontally(initialOffsetX = { it })
                 } else {
