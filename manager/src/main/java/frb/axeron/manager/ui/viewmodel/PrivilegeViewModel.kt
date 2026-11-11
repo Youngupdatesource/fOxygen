@@ -83,10 +83,6 @@ class PrivilegeViewModel(application: Application) : AndroidViewModel(applicatio
     var isRefreshing: Boolean by mutableStateOf(false)
         private set
 
-    /** False until the first load of the installed apps has finished (the list shows a skeleton). */
-    var isLoaded: Boolean by mutableStateOf(false)
-        private set
-
     var search by mutableStateOf("")
 
     val privilegeList by derivedStateOf {
@@ -250,7 +246,6 @@ class PrivilegeViewModel(application: Application) : AndroidViewModel(applicatio
             if (trusted) {
                 saveGrantedCache(result.values.filter { it.isAdded }.map { it.uid }.toSet())
             }
-            isLoaded = true
             isRefreshing = false
         }
     }

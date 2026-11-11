@@ -33,8 +33,6 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import frb.axeron.manager.ui.component.riseIn
-import frb.axeron.manager.ui.component.PrivilegeSkeletonRow
-import frb.axeron.manager.ui.component.rememberShimmerPhase
 import androidx.compose.foundation.lazy.itemsIndexed
 import frb.axeron.manager.R
 import frb.axeron.manager.ui.component.RoundedCheckbox
@@ -163,9 +161,6 @@ fun PrivilegeScreen(
             val keyTracker = remember { PrivilegeKeyTracker() }
             val sourceList = privilegeViewModel.privilegeList
             val keyedList = remember(sourceList) { keyTracker.keyed(sourceList) }
-            // The shimmer animation exists only while the skeleton is on screen: an infinite
-            // animation left running would keep the screen redrawing for nothing.
-            val shimmer = if (!privilegeViewModel.isLoaded) rememberShimmerPhase() else null
 
             LazyColumn(
                 state = listState,
@@ -176,17 +171,6 @@ fun PrivilegeScreen(
                     bottom = LocalCapsuleInset.current + 16.dp
                 )
             ) {
-                // Until the first load has finished the list would be empty: show placeholder rows
-                // shaped like the real ones (same entrance, one shared shimmer) instead.
-                if (shimmer != null) {
-                    items(count = SKELETON_ROWS, key = { "skeleton_$it" }, contentType = { "skeleton" }) { index ->
-                        PrivilegeSkeletonRow(
-                            phase = shimmer,
-                            index = index,
-                            modifier = Modifier.riseIn(index = index.coerceAtMost(8), distance = 32.dp)
-                        )
-                    }
-                }
                 itemsIndexed(
                     keyedList,
                     key = { _, it -> it.key },
@@ -305,8 +289,6 @@ fun PrivilegeScreen(
         }
     }
 }
-
-private const val SKELETON_ROWS = 9
 
 private class KeyedApp(val key: String, val app: AppsViewModel.AppInfo)
 
