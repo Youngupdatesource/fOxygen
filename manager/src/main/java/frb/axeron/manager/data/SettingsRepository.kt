@@ -1,6 +1,7 @@
 package frb.axeron.manager.data
 
 import android.content.ContentResolver
+import android.net.Uri
 import android.provider.Settings
 import frb.axeron.api.Axeron
 import frb.axeron.api.AxeronPluginService
@@ -40,28 +41,59 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
         }
     }
 
-    /** Simpan / ubah nilai setting */
+    /**
+     * Simpan / ubah nilai setting. Without the server, Global/Secure/System fall back to the
+     * app's own WRITE_SECURE_SETTINGS / WRITE_SETTINGS (see [SettingsAccess]).
+     */
     fun putValue(type: SettingType, key: String, value: String): Boolean {
+        if (type == SettingType.AXERON_ENV) return setAxeronEnv(key, value)
+        if (!Axeron.pingBinder()) return putDirect(type, key, value)
         return when (type) {
             SettingType.GLOBAL,
             SettingType.SECURE,
-            SettingType.SYSTEM -> putSetting(type, key, value)
+            SettingType.SYSTEM -> putSetting(type, key, value) || putDirect(type, key, value)
 
             SettingType.ANDROID_PROP -> setAndroidProp(key, value)
             SettingType.AXERON_ENV -> setAxeronEnv(key, value)
         }
     }
 
+    private fun putDirect(type: SettingType, key: String, value: String): Boolean = try {
+        when (type) {
+            SettingType.GLOBAL -> Settings.Global.putString(contentResolver, key, value)
+            SettingType.SECURE -> Settings.Secure.putString(contentResolver, key, value)
+            SettingType.SYSTEM -> Settings.System.putString(contentResolver, key, value)
+            SettingType.ANDROID_PROP, SettingType.AXERON_ENV -> false
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        false
+    }
+
     /** Hapus nilai setting (atau kosongkan) */
     fun deleteValue(type: SettingType, key: String): Boolean {
+        if (type == SettingType.AXERON_ENV) return unsetAxeronEnv(key)
+        if (!Axeron.pingBinder()) return deleteDirect(type, key)
         return when (type) {
             SettingType.GLOBAL,
             SettingType.SECURE,
-            SettingType.SYSTEM -> deleteSetting(type, key)
+            SettingType.SYSTEM -> deleteSetting(type, key) || deleteDirect(type, key)
 
             SettingType.ANDROID_PROP -> setAndroidProp(key, "")
             SettingType.AXERON_ENV -> unsetAxeronEnv(key)
         }
+    }
+
+    private fun deleteDirect(type: SettingType, key: String): Boolean = try {
+        val uri = contentUriOf(type)
+        if (uri != null) {
+            contentResolver.delete(uri, "name = ?", arrayOf(key)) >= 0
+        } else {
+            false
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        false
     }
 
     /** Ambil semua key-value untuk tipe tertentu */
@@ -101,8 +133,38 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
         }
     }
 
+    private fun contentUriOf(type: SettingType): Uri? = when (type) {
+        SettingType.GLOBAL -> Settings.Global.CONTENT_URI
+        SettingType.SECURE -> Settings.Secure.CONTENT_URI
+        SettingType.SYSTEM -> Settings.System.CONTENT_URI
+        SettingType.ANDROID_PROP, SettingType.AXERON_ENV -> null
+    }
+
+    private fun querySettingsDirect(type: SettingType): Map<String, String> {
+        val uri = contentUriOf(type) ?: return emptyMap()
+        val map = mutableMapOf<String, String>()
+        try {
+            contentResolver.query(uri, arrayOf("name", "value"), null, null, null)?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex("name")
+                val valIdx = cursor.getColumnIndex("value")
+                if (nameIdx >= 0 && valIdx >= 0) {
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(nameIdx) ?: continue
+                        val value = cursor.getString(valIdx) ?: ""
+                        map[name] = value
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return map
+    }
 
     private fun querySettings(type: SettingType): Map<String, String> {
+        if (!Axeron.pingBinder()) {
+            return querySettingsDirect(type)
+        }
         val alias = type.alias
         val map = mutableMapOf<String, String>()
 
@@ -110,7 +172,6 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
             val process = Axeron.newProcess(arrayOf("settings", "list", alias))
             process.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
-                    // Format baris biasanya: name=value
                     val splitIndex = line.indexOf('=')
                     if (splitIndex != -1) {
                         val name = line.substring(0, splitIndex).trim()
@@ -119,17 +180,17 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
                     }
                 }
             }
-
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        return map
+        return if (map.isNotEmpty()) map else querySettingsDirect(type)
     }
 
 
     // ======= AndroidProp =======
     private fun getAndroidProp(key: String): String? {
+        if (!Axeron.pingBinder()) return null
         return try {
             val process = Axeron.newProcess(arrayOf(AxeronPluginService.RESETPROP, key))
             process.inputStream.bufferedReader().use { it.readText().trim() }
@@ -140,6 +201,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
     }
 
     private fun setAndroidProp(key: String, value: String): Boolean {
+        if (!Axeron.pingBinder()) return false
         return try {
             Axeron.newProcess(arrayOf(AxeronPluginService.RESETPROP, key, value)).waitFor() == 0
         } catch (e: Exception) {
@@ -149,13 +211,13 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
     }
 
     private fun getAllAndroidProps(): Map<String, String> {
+        if (!Axeron.pingBinder()) return emptyMap()
         val map = mutableMapOf<String, String>()
         try {
             val process = Axeron.newProcess(AxeronPluginService.RESETPROP)
             process.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
-                    // Format output: [key]: [value]
-                    val match = Regex("\\[(.+?)]: \\[(.*?)]").find(line)
+                    val match = PROP_LINE.find(line)
                     if (match != null) {
                         val (key, value) = match.destructured
                         map[key] = value
@@ -170,14 +232,16 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
 
     // ======= Linux Env =======
 
-    private fun getAxeronEnv(key: String): String? = Axeron.getEnvironment().envMap[key]
+    private fun getAxeronEnv(key: String): String? =
+        if (Axeron.pingBinder()) Axeron.getEnvironment().envMap[key] else null
 
 
     private val envMap: Map<String, String>
         get() = Axeron.getEnvironment(TYPE_NEW_ENV).envMap
 
     private fun setAxeronEnv(key: String, value: String): Boolean {
-        val newEnvMap = HashMap(envMap) // mutable
+        if (!Axeron.pingBinder()) return false
+        val newEnvMap = HashMap(envMap)
         newEnvMap[key] = value
         return try {
             Axeron.setNewEnvironment(Environment(newEnvMap, true))
@@ -189,7 +253,8 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
     }
 
     private fun unsetAxeronEnv(key: String): Boolean {
-        val newEnvMap = HashMap(envMap) // mutable
+        if (!Axeron.pingBinder()) return false
+        val newEnvMap = HashMap(envMap)
         newEnvMap.remove(key)
         return try {
             Axeron.setNewEnvironment(Environment(newEnvMap, true))
@@ -201,6 +266,11 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
     }
 
     private fun getAllLinuxEnv(): Map<String, String> {
+        if (!Axeron.pingBinder()) return emptyMap()
         return Axeron.getEnvironment().envMap
+    }
+
+    private companion object {
+        val PROP_LINE = Regex("\\[(.+?)]: \\[(.*?)]")
     }
 }

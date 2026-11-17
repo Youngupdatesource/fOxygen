@@ -1,6 +1,7 @@
 package frb.axeron.server;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.google.gson.annotations.SerializedName;
 
@@ -9,7 +10,7 @@ import java.util.List;
 
 public class AxeronConfig {
 
-    public static final int LATEST_VERSION = 2;
+    public static final int LATEST_VERSION = 3;
 
     @SerializedName("version")
     public int version = LATEST_VERSION;
@@ -35,6 +36,14 @@ public class AxeronConfig {
 
         @SerializedName("packages")
         public List<String> packages;
+
+        /**
+         * SHA-256 of the signing certificate of the app the entry was made for. Null in configs
+         * written before v3; AxeronConfigManager fills it in from the app on the uid then.
+         */
+        @Nullable
+        @SerializedName("signature")
+        public String signature;
 
         public PackageEntry(int uid, int flags) {
             this.uid = uid;

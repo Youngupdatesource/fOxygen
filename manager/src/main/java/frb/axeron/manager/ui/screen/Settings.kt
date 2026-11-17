@@ -84,6 +84,7 @@ import frb.axeron.manager.ui.util.LocalCapsuleInset
 import frb.axeron.adb.util.AdbEnvironment
 import frb.axeron.api.Axeron
 import frb.axeron.manager.R
+import frb.axeron.manager.data.SettingsAccess
 import frb.axeron.manager.ui.theme.axScrollTopAppBarColors
 import frb.axeron.manager.ui.theme.cardContainerColor
 import frb.axeron.manager.ui.theme.insetTextFieldColors
@@ -354,7 +355,10 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
 //                    )
 //                }
 
-                this@Column.AnimatedVisibility(visible = axeronRunning) {
+                val canEditSettings = axeronRunning ||
+                    SettingsAccess.canWriteSecure(context) ||
+                    SettingsAccess.canWriteSystem(context)
+                this@Column.AnimatedVisibility(visible = canEditSettings) {
                     SettingsItem(
                         type = SettingsItemType.CHILD,
                         iconVector = Icons.Filled.Edit,

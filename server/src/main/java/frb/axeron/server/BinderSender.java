@@ -337,7 +337,11 @@ public class BinderSender {
                 UID_LIST.remove(uid);
                 LOGGER.v("Uid %d dead", uid);
             }
+            UID_PACKAGE_CACHE.remove(uid);
             forgetSentUid(uid);
+            if (axeronService instanceof AxeronService) {
+                ((AxeronService) axeronService).getConfigManager().invalidate(uid);
+            }
         }
     }
 }

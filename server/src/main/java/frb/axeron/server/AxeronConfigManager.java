@@ -20,11 +20,13 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 import frb.axeron.ktx.HandlerKt;
+import frb.axeron.server.util.UserHandleCompat;
 import frb.axeron.shared.AxeronApiConstant;
 import frb.axeron.shared.PathHelper;
 import kotlin.collections.ArraysKt;
@@ -39,13 +41,14 @@ public class AxeronConfigManager extends ConfigManager {
             .setVersion(AxeronConfig.LATEST_VERSION)
             .create();
 
-    // Short on purpose: a restart/kill within the delay used to throw away the pending write,
-    // which reset every checked app in the Privileges list (root daemon is killed hard).
     private static final long WRITE_DELAY = 500;
 
-    private static final File FILE = PathHelper.getWorkingPath(Os.getuid() == 0,AxeronApiConstant.folder.PARENT + "ax_permission.json");
+    private static final File FILE = PathHelper.getWorkingPath(Os.getuid() == 0, AxeronApiConstant.folder.PARENT + "ax_permission.json");
     private static final AtomicFile ATOMIC_FILE = new AtomicFile(FILE);
     private final AxeronConfig config;
+    /** Uids whose entry was checked against the app on them, until the uid's processes are gone. */
+    private final Set<Integer> verified = new HashSet<>();
+
     private final Runnable mWriteRunner = new Runnable() {
 
         @Override
@@ -60,14 +63,19 @@ public class AxeronConfigManager extends ConfigManager {
         this.config = load();
 
         boolean changed = false;
-
-        // When the package manager is not answering yet (root daemon started early at boot,
-        // or while the system is busy), "uid has no packages" does NOT mean the app is gone.
-        // Never wipe the saved permissions in that case.
         boolean pmReady = isPackageManagerReady();
 
         if (config.packages == null) {
             config.packages = new ArrayList<>();
+            changed = true;
+        }
+
+        if (config.version < 3) {
+            for (AxeronConfig.PackageEntry entry : config.packages) {
+                entry.flags = entry.flags & ~ConfigManager.FLAG_DENIED;
+            }
+            LOGGER.i("config v%d -> v%d: cleared implicit denials", config.version, AxeronConfig.LATEST_VERSION);
+            config.version = AxeronConfig.LATEST_VERSION;
             changed = true;
         }
 
@@ -88,8 +96,6 @@ public class AxeronConfigManager extends ConfigManager {
                 continue;
             }
 
-            // Entries written by updateFlagsForUid() used to be saved with an empty package
-            // list. They were then treated as "packages changed" and deleted on the next start.
             if (entry.packages.isEmpty()) {
                 entry.packages.addAll(packages);
                 changed = true;
@@ -133,15 +139,18 @@ public class AxeronConfigManager extends ConfigManager {
                 String pkg = pi.packageName;
                 AxeronConfig.PackageEntry entry = findLocked(uid);
                 boolean allowed = false;
+                boolean denied = false;
 
-                if (entry != null) {
-                    allowed = entry.packages.contains(pkg) && entry.isAllowed();
+                if (entry != null && entry.packages != null && entry.packages.contains(pkg)) {
+                    allowed = entry.isAllowed();
+                    denied = entry.isDenied();
                 }
 
                 List<String> packages = new ArrayList<>();
                 packages.add(pkg);
 
-                updateLocked(uid, packages, ConfigManager.MASK_PERMISSION, allowed ? ConfigManager.FLAG_ALLOWED : ConfigManager.FLAG_DENIED);
+                int flags = allowed ? ConfigManager.FLAG_ALLOWED : (denied ? ConfigManager.FLAG_DENIED : 0);
+                updateLocked(uid, packages, ConfigManager.MASK_PERMISSION, flags);
                 changed = true;
             }
         }
@@ -150,8 +159,6 @@ public class AxeronConfigManager extends ConfigManager {
             scheduleWriteLocked();
         }
 
-        // The daemon can be killed without running any exit hook (restart from the manager,
-        // SIGTERM). Flush whatever is still pending.
         try {
             Runtime.getRuntime().addShutdownHook(new Thread(this::flush, "ax-config-flush"));
         } catch (Throwable tr) {
@@ -249,20 +256,70 @@ public class AxeronConfigManager extends ConfigManager {
     }
 
     @Nullable
+    private String signatureOf(int uid, List<String> packages) {
+        if (packages == null || packages.isEmpty()) return null;
+        return AxeronService.certDigest(packages.get(0), UserHandleCompat.getUserId(uid));
+    }
+
+    @Nullable
+    private AxeronConfig.PackageEntry findVerifiedLocked(int uid) {
+        AxeronConfig.PackageEntry entry = findLocked(uid);
+        if (entry == null) return null;
+        if (verified.contains(uid)) return entry;
+
+        List<String> packages = PackageManagerApis.getPackagesForUidNoThrow(uid);
+        String signature = signatureOf(uid, packages);
+        if (signature == null) return null;
+
+        boolean hasPkg = false;
+        if (entry.packages != null) {
+            for (String p : entry.packages) {
+                if (packages.contains(p)) {
+                    hasPkg = true;
+                    break;
+                }
+            }
+        }
+        String stored = entry.signature;
+        if (!hasPkg || (stored != null && !stored.equals(signature))) {
+            LOGGER.w("remove config for uid %d since it isn't the app it was made for", uid);
+            removeLocked(uid);
+            return null;
+        }
+        if (stored == null) {
+            entry.signature = signature;
+            scheduleWriteLocked();
+        }
+        verified.add(uid);
+        return entry;
+    }
+
+    @Nullable
     @Override
     public AxeronConfig.PackageEntry find(int uid) {
         synchronized (this) {
-            return findLocked(uid);
+            return findVerifiedLocked(uid);
+        }
+    }
+
+    public void invalidate(int uid) {
+        synchronized (this) {
+            verified.remove(uid);
         }
     }
 
     @Nullable
     public AxeronConfig.PackageEntry findOrUpdate(int uid) {
         synchronized (this) {
-            AxeronConfig.PackageEntry entry = findLocked(uid);
+            AxeronConfig.PackageEntry entry = findVerifiedLocked(uid);
             if (entry == null) {
-                entry = new AxeronConfig.PackageEntry(uid, ConfigManager.MASK_PERMISSION & ConfigManager.FLAG_DENIED);
-                entry.packages.addAll(PackageManagerApis.getPackagesForUidNoThrow(uid));
+                entry = findLocked(uid);
+            }
+            if (entry == null) {
+                entry = new AxeronConfig.PackageEntry(uid, 0);
+                List<String> packages = PackageManagerApis.getPackagesForUidNoThrow(uid);
+                entry.packages.addAll(packages);
+                entry.signature = signatureOf(uid, packages);
                 config.packages.add(entry);
             }
             return entry;
@@ -270,8 +327,6 @@ public class AxeronConfigManager extends ConfigManager {
     }
 
     private void updateLocked(int uid, List<String> packages, int mask, int values) {
-        // updateFlagsForUid() passes no package list. Without one the entry is saved with
-        // empty packages and gets deleted on the next daemon start, so resolve it here.
         if (packages == null) {
             packages = PackageManagerApis.getPackagesForUidNoThrow(uid);
         }
@@ -280,11 +335,16 @@ public class AxeronConfigManager extends ConfigManager {
         AxeronConfig.PackageEntry entry = findLocked(uid);
         if (entry == null) {
             entry = new AxeronConfig.PackageEntry(uid, mask & values);
+            entry.signature = signatureOf(uid, packages);
             config.packages.add(entry);
             changed = true;
         } else {
             if (entry.packages == null) {
                 entry.packages = new ArrayList<>();
+                changed = true;
+            }
+            if (entry.signature == null) {
+                entry.signature = signatureOf(uid, packages);
                 changed = true;
             }
             int newValue = (entry.flags & ~mask) | (mask & values);
@@ -295,7 +355,7 @@ public class AxeronConfigManager extends ConfigManager {
         }
         if (packages != null) {
             for (String packageName : packages) {
-                if (entry.packages.contains(packageName)) {
+                if (packageName == null || entry.packages.contains(packageName)) {
                     continue;
                 }
                 entry.packages.add(packageName);
@@ -319,6 +379,7 @@ public class AxeronConfigManager extends ConfigManager {
             return;
         }
         config.packages.remove(entry);
+        verified.remove(uid);
         scheduleWriteLocked();
     }
 

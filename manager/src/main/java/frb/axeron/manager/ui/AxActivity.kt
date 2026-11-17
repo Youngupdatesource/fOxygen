@@ -236,12 +236,10 @@ class AxActivity : ComponentActivity() {
     private var contentReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // The entrance is played whenever the app is opened (a new process, or a new window with
-        // no saved state); a window that is only recreated by a rotation / theme change has
-        // nothing to replay: everything is simply there.
+        // Play the entrance animation strictly once per app process launch.
         val firstInProcess = !createdInThisProcess
         createdInThisProcess = true
-        if (firstInProcess || savedInstanceState == null) StartupMotion.begin()
+        if (firstInProcess && savedInstanceState == null) StartupMotion.begin()
         else StartupMotion.skip()
 
         val preloadDeadline = SystemClock.uptimeMillis() + BANNER_PRELOAD_MAX_MS
@@ -278,32 +276,18 @@ class AxActivity : ComponentActivity() {
                 val session = StartupMotion.session
                 LaunchedEffect(session) {
                     contentReady = true
-                    if (StartupMotion.played) return@LaunchedEffect // skip(): nothing to play
-                    // The start-up entrance (see StartupMotion): the visible tab's cards rise
-                    // in a moment after the splash has gone. Its window closes a little later;
-                    // a screen that shows up after that is simply there.
-                    delay(150L)
+                    if (StartupMotion.played) return@LaunchedEffect
+                    delay(100L)
                     StartupMotion.revealed = true
-                    delay(2500L)
+                    // Wait one frame so the initial screen's mounted items start their animation,
+                    // then immediately lock played = true so tapping the bottom pill never replays it.
+                    withFrameNanos { }
                     StartupMotion.played = true
+                    delay(650L)
                     StartupMotion.settled = true
                 }
             }
         }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        stoppedAt = SystemClock.elapsedRealtime()
-    }
-
-    override fun onStart() {
-        super.onStart()
-        // Opened again from the background (the process was still alive): the entrance plays
-        // again, like on a fresh start, after a real absence and not a quick app switch.
-        val away = if (stoppedAt == 0L) 0L else SystemClock.elapsedRealtime() - stoppedAt
-        stoppedAt = 0L
-        if (away >= REPLAY_AFTER_BACKGROUND_MS && StartupMotion.played) StartupMotion.begin()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -405,7 +389,10 @@ class AxActivity : ComponentActivity() {
         }
 
         // Urutan tab yang sedang tampil di bottom bar (tab needAxeron disembunyikan saat server mati).
-        val swipeTabs = BottomBarDestination.entries.filter { axeronInfo.isRunning() || !it.needAxeron }
+        val isServerRunning = axeronInfo.isRunning()
+        val swipeTabs = remember(isServerRunning) {
+            BottomBarDestination.entries.filter { isServerRunning || !it.needAxeron }
+        }
         val currentTabIndex = swipeTabs.indexOfFirst { it.direction.route == currentDestination?.route }
 
         val showBottomBar = when (currentDestination?.route) {
@@ -718,12 +705,13 @@ class AxActivity : ComponentActivity() {
         ) {
             Surface(
                 shape = CircleShape,
-                color = capsuleContainerColor().copy(alpha = fade),
+                color = capsuleContainerColor(),
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 shadowElevation = CapsuleShadow
             ) {
-                val tabs = BottomBarDestination.entries.filter {
-                    axeronServerInfo.isRunning() || !it.needAxeron
+                val running = axeronServerInfo.isRunning()
+                val tabs = remember(running) {
+                    BottomBarDestination.entries.filter { running || !it.needAxeron }
                 }
                 // key(): state tiap tab tetap stabil saat tab muncul/hilang (server hidup/mati).
                 val selectedStates = tabs.map { tab ->
@@ -781,6 +769,7 @@ class AxActivity : ComponentActivity() {
                     }
                 }
                 val goTo: (BottomBarDestination) -> Unit = { destination ->
+                    StartupMotion.finishNow()
                     navigator.navigate(destination.direction) {
                         popUpTo(NavGraphs.root) {
                             saveState = true
@@ -987,10 +976,12 @@ class AxActivity : ComponentActivity() {
                                 onClick = {
                                     // Klik yang menyusul setelah hold-geser tidak boleh ikut dieksekusi.
                                     if (!swipe.scrubbing) {
+                                        StartupMotion.finishNow()
                                         if (index == selectedIndex) {
                                             navigator.popBackStack(destination.direction, false)
+                                        } else {
+                                            goTo(destination)
                                         }
-                                        goTo(destination)
                                     }
                                 }
                             )
@@ -1161,6 +1152,7 @@ private class TabSwipeState {
 
     /** Jari baru menyentuh saat animasi sebelumnya belum selesai: batalkan, lanjut dari posisi sekarang. */
     fun beginDrag() {
+        StartupMotion.finishNow()
         if (!handingOff) job?.cancel()
     }
 

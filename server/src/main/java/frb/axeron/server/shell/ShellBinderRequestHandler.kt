@@ -10,6 +10,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import frb.axeron.api.Axeron
+import frb.axeron.axsh.AxshConstants
 import frb.axeron.server.ServerConstants
 import frb.axeron.shared.AxeronApiConstant
 import java.util.concurrent.atomic.AtomicBoolean
@@ -18,9 +19,9 @@ object ShellBinderRequestHandler {
 
     private const val TAG = "ShellBinderRequest"
 
-    private const val BINDER_WAIT_MS = 2_500L
+    private const val BINDER_WAIT_MS = 4_000L
 
-    private const val FRESH_PROCESS_MS = 3_000L
+    private const val FRESH_PROCESS_MS = 4_500L
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -30,21 +31,23 @@ object ShellBinderRequestHandler {
             return false
         }
 
-        val receiver = intent.getBundleExtra("data")?.getBinder("binder")
+        val bundle = intent.getBundleExtra("data")
+        val receiver = bundle?.getBinder("binder")
+        val uid = bundle?.getInt(AxshConstants.EXTRA_UID, -1) ?: -1
         if (receiver == null) {
             onDone()
             return false
         }
 
         Axeron.getBinder()?.takeIf { it.pingBinder() }?.let {
-            reply(context, receiver, it)
+            reply(context, receiver, it, uid)
             onDone()
             return true
         }
 
         val age = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
         if (age > FRESH_PROCESS_MS) {
-            reply(context, receiver, null)
+            reply(context, receiver, null, uid)
             onDone()
             return true
         }
@@ -54,7 +57,7 @@ object ShellBinderRequestHandler {
             override fun onBinderReceived() {
                 if (done.getAndSet(true)) return
                 Axeron.removeBinderReceivedListener(this)
-                reply(context, receiver, Axeron.getBinder())
+                reply(context, receiver, Axeron.getBinder(), uid)
                 onDone()
             }
         }
@@ -63,16 +66,41 @@ object ShellBinderRequestHandler {
             if (done.getAndSet(true)) return@postDelayed
             Axeron.removeBinderReceivedListener(listener)
             Log.w(TAG, "no binder from the server within ${BINDER_WAIT_MS}ms")
-            reply(context, receiver, null)
+            reply(context, receiver, null, uid)
             onDone()
         }, BINDER_WAIT_MS)
         return true
     }
 
-    private fun reply(context: Context, receiver: IBinder, axeronBinder: IBinder?) {
+    /**
+     * Mints a UID-scoped [frb.axeron.server.ClientCapability] from the server when the requester
+     * supplied its uid, so non-manager callers never receive the manager's unrestricted binder.
+     */
+    private fun resolveClientBinder(serverBinder: IBinder?, uid: Int): IBinder? {
+        if (serverBinder == null || !serverBinder.pingBinder()) return null
+        if (uid <= 0 || uid == Process.myUid()) return serverBinder
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(AxshConstants.SERVICE_DESCRIPTOR)
+            data.writeInt(uid)
+            serverBinder.transact(AxshConstants.TRANSACTION_GET_CLIENT_CAPABILITY, data, reply, 0)
+            reply.readException()
+            reply.readStrongBinder() ?: serverBinder
+        } catch (e: Throwable) {
+            Log.w(TAG, "getClientCapability failed for uid=$uid", e)
+            serverBinder
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    private fun reply(context: Context, receiver: IBinder, axeronBinder: IBinder?, uid: Int) {
+        val scopedBinder = resolveClientBinder(axeronBinder, uid)
         val data = Parcel.obtain()
         try {
-            data.writeStrongBinder(axeronBinder)
+            data.writeStrongBinder(scopedBinder)
             data.writeLong(AxeronApiConstant.server.VERSION_CODE)
             data.writeString(context.applicationInfo.nativeLibraryDir)
             receiver.transact(1, data, null, IBinder.FLAG_ONEWAY)

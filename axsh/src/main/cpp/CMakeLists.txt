@@ -17,11 +17,13 @@ endif()
 
 find_package(cxx REQUIRED CONFIG)
 
+# Packaged as libaxsh.so so it lands in nativeLibraryDir, where exec is allowed (W^X).
 add_executable(libaxsh.so
-        main.cpp transport.cpp)
+        main.cpp transport.cpp daemon.cpp)
 
 target_link_libraries(libaxsh.so log cxx::cxx)
 
+# Server side: the JNI library behind PtyHost, which forks the remote shell on a PTY or pipes.
 add_library(axsh_host SHARED
         host/pty_host.cpp host/pts.cpp)
 

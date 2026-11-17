@@ -16,4 +16,8 @@ interface IAxshLauncher {
         boolean pty,
         long size,
         in ParcelFileDescriptor status);
+
+    ParcelFileDescriptor openAxshChannel();
+
+    String getAxshSocketName();
 }

@@ -16,29 +16,25 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
 /**
- * The cue for the app's entrance, every time it is opened (not only on Home).
+ * The cue for the app's entrance, played strictly once when the app process is opened.
  *
- * Until [revealed] the things marked with [riseIn] wait out of sight, just below where they
- * belong; AxActivity flips it a moment after the system splash is gone, and they rise into
- * place one after another. This holds for whichever tab the app opens on: Home, Privileges,
- * Plugins or Settings.
- *
- * [begin] starts the entrance over (a new [session]): it is called when the app is opened from
- * scratch and when it comes back from the background after a while, so an app that was still
- * alive in the background plays the entrance again instead of just appearing.
+ * Until [revealed] the things marked with [riseIn] on the initial screen wait out of sight;
+ * AxActivity flips [revealed] right after the splash screen is removed and immediately marks
+ * [played] once the initial frame's items have claimed their animation, so switching tabs via
+ * the bottom pill or navigating later never replays the entrance animation.
  */
 object StartupMotion {
-    /** Bumps every time the entrance starts over; items hide and rise in again. */
+    /** Bumps when the initial entrance session starts. */
     var session by mutableIntStateOf(0)
         internal set
 
-    /** True from the moment the current entrance should start to come in. */
+    /** True from the moment the current entrance should start rising in. */
     var revealed by mutableStateOf(false)
         internal set
 
     /**
-     * True once the window for the entrance is over (a little after [revealed]). A screen that
-     * shows up later, or comes back to, is simply there: nothing is replayed.
+     * True as soon as the initial screen has started its entrance (or when the user interacts
+     * with navigation). Any screen or tab composed after this starts in place (1f) with no replay.
      */
     @Volatile
     var played = false
@@ -51,7 +47,7 @@ object StartupMotion {
     var settled by mutableStateOf(false)
         internal set
 
-    /** Starts the entrance over: everything marked with [riseIn] hides and rises in again. */
+    /** Starts the entrance once for a fresh app launch. */
     internal fun begin() {
         played = false
         settled = false
@@ -59,7 +55,14 @@ object StartupMotion {
         session++
     }
 
-    /** No entrance (for example the window was only recreated by a rotation): all is in place. */
+    /** Marks the entrance window closed so subsequent tab taps never trigger [riseIn]. */
+    internal fun finishNow() {
+        played = true
+        settled = true
+        revealed = true
+    }
+
+    /** No entrance (e.g. activity recreation / rotation / already played in this process). */
     internal fun skip() {
         played = true
         settled = true
@@ -67,47 +70,46 @@ object StartupMotion {
     }
 }
 
-private const val BASE_DELAY_MS = 90L
+private const val BASE_DELAY_MS = 70L
 
 /**
- * Rises into place on the start-up entrance: from [distance] below, fading in and settling from
- * a slightly smaller size, [index] steps after the first. A spring with a little give carries it
- * the last bit, so it lands rather than stops. Without an entrance in progress (already played)
- * it is a no-op in effect: it starts in place.
- *
- * It wraps exactly one thing, so putting it on a Box around a card does not change the layout.
+ * Rises into place on the initial app launch only. Once settled (or on any tab opened after the
+ * initial launch frame), returns [this] directly without attaching a redundant graphicsLayer.
  */
 @Composable
 fun Modifier.riseIn(
     index: Int,
     distance: Dp = 56.dp,
-    stepMs: Long = 60L,
+    stepMs: Long = 50L,
 ): Modifier {
     val session = StartupMotion.session
     val revealed = StartupMotion.revealed
     val progress = remember { Animatable(if (StartupMotion.played) 1f else 0f) }
-    // The session this item's progress belongs to. When a newer session starts (the app was
-    // opened again) the item is hidden at once, in the very same frame, and the effect below
-    // winds its progress back to 0 and lets it rise in again.
     var ownSession by remember { mutableIntStateOf(session) }
 
     LaunchedEffect(session, revealed) {
         if (ownSession != session) {
-            progress.snapTo(0f)
             ownSession = session
+            if (!StartupMotion.played) {
+                progress.snapTo(0f)
+            }
         }
         if (revealed && progress.value < 1f) {
             delay(BASE_DELAY_MS + index * stepMs)
             progress.animateTo(
                 targetValue = 1f,
-                animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f)
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = 240f)
             )
         }
     }
 
+    if (StartupMotion.played && StartupMotion.session == ownSession && progress.value >= 0.999f) {
+        return this
+    }
+
     return this.graphicsLayer {
-        val p = if (StartupMotion.session != ownSession) 0f else progress.value
-        alpha = (p * 2f).coerceIn(0f, 1f) // fully there by the time it is half way up
+        val p = if (StartupMotion.session != ownSession && !StartupMotion.played) 0f else progress.value
+        alpha = (p * 2f).coerceIn(0f, 1f)
         translationY = (1f - p) * distance.toPx()
         val s = 0.97f + 0.03f * p.coerceIn(0f, 1f)
         scaleX = s

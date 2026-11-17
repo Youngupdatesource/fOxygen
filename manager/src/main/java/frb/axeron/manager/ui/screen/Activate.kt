@@ -70,6 +70,7 @@ import androidx.lifecycle.compose.dropUnlessResumed
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import frb.axeron.adb.AdbPairingService
 import frb.axeron.adb.util.AdbEnvironment
+import frb.axeron.adb.util.DeveloperSettings
 import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.core.Starter
 import frb.axeron.manager.R
@@ -343,41 +344,22 @@ fun WirelessDebuggingCard(
 
     LaunchedEffect(activateViewModel.devSettings) {
         if (activateViewModel.devSettings) {
-            val packageName = "com.android.settings"
             val flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_NO_HISTORY or
                     Intent.FLAG_ACTIVITY_CLEAR_TASK or
                     Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
 
-            try {
-                val intent = Intent(TileService.ACTION_QS_TILE_PREFERENCES).apply {
-                    putExtra(
-                        Intent.EXTRA_COMPONENT_NAME,
-                        ComponentName(
-                            packageName,
-                            "com.android.settings.development.qstile.DevelopmentTiles\$WirelessDebugging"
-                        )
-                    )
-                    addFlags(flags)
-                }
-                launcherDeveloper.launch(intent)
-            } catch (e1: Exception) {
+            var launched = false
+            for (candidate in DeveloperSettings.candidates(flags)) {
                 try {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
-                        putExtra(":settings:fragment_args_key", "toggle_adb_wireless")
-                        addFlags(flags)
-                    }
-                    launcherDeveloper.launch(intent)
-                } catch (e2: Exception) {
-                    try {
-                        val intent = Intent(Settings.ACTION_SETTINGS).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        launcherDeveloper.launch(intent)
-                    } catch (e3: Exception) {
-                        Toast.makeText(context, "Tidak dapat membuka pengaturan", Toast.LENGTH_SHORT).show()
-                    }
+                    launcherDeveloper.launch(candidate)
+                    launched = true
+                    break
+                } catch (_: Exception) {
                 }
+            }
+            if (!launched) {
+                Toast.makeText(context, "Tidak dapat membuka pengaturan", Toast.LENGTH_SHORT).show()
             }
             activateViewModel.setLaunchDevSettings(false)
         }

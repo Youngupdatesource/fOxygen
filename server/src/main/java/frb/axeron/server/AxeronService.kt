@@ -26,6 +26,10 @@ import android.os.SystemClock
 import android.os.UserHandle
 import android.os.UserHandleHidden
 import android.system.Os
+import android.util.SparseArray
+import frb.axeron.server.axsh.AxshServer
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import dev.rikka.tools.refine.Refine
 import frb.axeron.axsh.AxshConstants
 import frb.axeron.axsh.IAxshLauncher
@@ -121,6 +125,29 @@ open class AxeronService :
                 } catch (it: Throwable) {
                     LOGGER.e("waitSystemService failed", it)
                 }
+            }
+        }
+
+        @JvmStatic
+        fun certDigest(packageName: String, userId: Int = 0): String? {
+            val signing = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                @Suppress("DEPRECATION")
+                PackageManager.GET_SIGNATURES
+            }
+            val info = PackageManagerApis.getPackageInfoNoThrow(packageName, signing.toLong(), userId)
+                ?: return null
+            val signers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                info.signatures
+            }
+            if (signers.isNullOrEmpty()) return null
+            return signers.joinToString(",") { signer ->
+                MessageDigest.getInstance("SHA-256").digest(signer.toByteArray())
+                    .joinToString("") { "%02x".format(it) }
             }
         }
 
@@ -444,6 +471,7 @@ open class AxeronService :
             }, "axeron-send-binder").apply { isDaemon = true }.start()
         }
 
+        startAxsh()
         startDeathWatchdog()
     }
 
@@ -811,13 +839,17 @@ open class AxeronService :
                 false
             )
         } else {
-            try {
-                PermissionManagerApis.grantRuntimePermission(
-                    MANAGER_APPLICATION_ID,
-                    WRITE_SECURE_SETTINGS, UserHandleCompat.getUserId(callingUid)
-                )
-            } catch (e: RemoteException) {
-                LOGGER.w(e, "grant WRITE_SECURE_SETTINGS")
+            val userId = UserHandleCompat.getUserId(callingUid)
+            if (managerGrantedUids.add(callingUid)) {
+                try {
+                    PermissionManagerApis.grantRuntimePermission(
+                        MANAGER_APPLICATION_ID,
+                        WRITE_SECURE_SETTINGS, userId
+                    )
+                } catch (e: Throwable) {
+                    LOGGER.w(e, "grant WRITE_SECURE_SETTINGS")
+                }
+                allowWriteSettings(userId)
             }
         }
         try {
@@ -895,7 +927,73 @@ open class AxeronService :
     }
 
 
-    private val axshLauncher = object : IAxshLauncher.Stub() {
+    private val managerGrantedUids: MutableSet<Int> = ConcurrentHashMap.newKeySet()
+
+    private fun allowWriteSettings(userId: Int) {
+        Thread({
+            try {
+                Runtime.getRuntime().exec(
+                    arrayOf("cmd", "appops", "set", "--user", userId.toString(), MANAGER_APPLICATION_ID, "WRITE_SETTINGS", "allow")
+                ).waitFor()
+            } catch (e: Throwable) {
+                LOGGER.w(e, "allowWriteSettings failed")
+            }
+        }, "ax-allow-write-settings").apply { isDaemon = true }.start()
+    }
+
+    private var axshServer: AxshServer? = null
+
+    private val capabilities = SparseArray<ClientCapability>()
+
+    fun capabilityOf(uid: Int): ClientCapability =
+        synchronized(capabilities) {
+            capabilities.get(uid) ?: ClientCapability(this, uid).also { capabilities.put(uid, it) }
+        }
+
+    fun getClientCapability(uid: Int): IBinder? {
+        enforceManagerPermission("getClientCapability")
+        if (uid < 0 || checkCaller(uid)) return asBinder()
+        return capabilityOf(uid)
+    }
+
+    private fun checkAxshCaller(uid: Int): Boolean {
+        if (uid == 0 || uid == 2000) return true
+        if (checkCaller(uid)) return true
+        return configManager.find(uid)?.isAllowed == true
+    }
+
+    fun startAxsh() {
+        val server = AxshServer(
+            launcherFor = { uid -> createAxshLauncher(uid) },
+            authorize = { uid, _ -> checkAxshCaller(uid) }
+        )
+        axshServer = server
+        server.start()
+    }
+
+    internal fun isAskingTransaction(code: Int): Boolean =
+        code == TRANSACTION_attachApplication ||
+            code == TRANSACTION_requestPermission ||
+            code == TRANSACTION_checkSelfPermission ||
+            code == TRANSACTION_shouldShowRequestPermissionRationale ||
+            code == TRANSACTION_getServerInfo
+
+    internal fun isManagerOnlyTransaction(code: Int): Boolean =
+        code == TRANSACTION_isFirstInit ||
+            code == TRANSACTION_enableShizukuService ||
+            code == TRANSACTION_setNewEnvironment ||
+            code == TRANSACTION_attachUserService ||
+            code == TRANSACTION_dispatchPermissionConfirmationResult ||
+            code == TRANSACTION_getFlagsForUid ||
+            code == TRANSACTION_updateFlagsForUid ||
+            code == TRANSACTION_exit ||
+            code == ServerConstants.BINDER_TRANSACTION_getApplications ||
+            code == AxshConstants.TRANSACTION_GET_CLIENT_CAPABILITY
+
+    internal fun dispatchClientTransaction(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean =
+        onTransact(code, data, reply, flags)
+
+    private fun createAxshLauncher(boundUid: Int? = null): IAxshLauncher = object : IAxshLauncher.Stub() {
 
         override fun getEnvironment(): Array<String>? =
             this@AxeronService.getEnvironment(TYPE_ENV)?.getEnv()
@@ -911,14 +1009,16 @@ open class AxeronService :
             status: ParcelFileDescriptor?
         ): IAxshProcess {
             try {
-                enforceCallingPermission("newAxshProcess")
+                val uid = boundUid ?: Binder.getCallingUid()
+                if (!checkAxshCaller(uid)) {
+                    enforceCallingPermission("newAxshProcess")
+                }
 
                 val argv = cmd?.filterNotNull()?.toTypedArray()
                 require(!argv.isNullOrEmpty()) { "empty command" }
                 requireNotNull(stdin) { "stdin" }
                 requireNotNull(stdout) { "stdout" }
 
-                val uid = Binder.getCallingUid()
                 val lowered = android.os.Process.myUid() == 0 &&
                     getFlagsForUidInternal(uid, AxshConstants.FLAG_AXSH_ROOTLESS) != 0
                 val command = if (lowered) {
@@ -938,13 +1038,13 @@ open class AxeronService :
                     command.contentToString()
                 )
 
-                val owner = clientManager.findClient(uid, Binder.getCallingPid())
-                    ?.client?.asBinder()
-                val process = AxshProcess.start(
+                val owner = if (boundUid == null) {
+                    clientManager.findClient(uid, Binder.getCallingPid())?.client?.asBinder()
+                } else null
+                return AxshProcess.start(
                     command, env?.filterNotNull()?.toTypedArray(), null,
                     stdin, stdout, stderr, pty, size, status, owner
                 )
-                return process
             } catch (e: Throwable) {
                 for (fd in arrayOf(stdin, stdout, stderr, status)) {
                     try {
@@ -955,11 +1055,31 @@ open class AxeronService :
                 throw e
             }
         }
+
+        override fun openAxshChannel(): ParcelFileDescriptor {
+            val uid = boundUid ?: Binder.getCallingUid()
+            if (!checkAxshCaller(uid)) {
+                throw SecurityException("Not allowed by fOxygen")
+            }
+            val server = axshServer ?: throw IllegalStateException("axsh server not running")
+            return server.openChannel(uid)
+        }
+
+        override fun getAxshSocketName(): String? {
+            val uid = boundUid ?: Binder.getCallingUid()
+            if (!checkAxshCaller(uid)) {
+                throw SecurityException("Not allowed by fOxygen")
+            }
+            return axshServer?.socketName
+        }
     }
+
+    private val axshLauncher: IAxshLauncher = createAxshLauncher(null)
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code == ServerConstants.BINDER_TRANSACTION_getApplications) {
             data.enforceInterface(BINDER_DESCRIPTOR)
+            enforceManagerPermission("getApplications")
             val userId = data.readInt()
             val result: ParcelableListSlice<PackageInfo?> = getApplications(userId)
             reply!!.writeNoException()
@@ -969,7 +1089,15 @@ open class AxeronService :
         if (code == AxshConstants.TRANSACTION_GET_LAUNCHER) {
             data.enforceInterface(BINDER_DESCRIPTOR)
             reply!!.writeNoException()
-            reply.writeStrongBinder(axshLauncher)
+            reply.writeStrongBinder(axshLauncher.asBinder())
+            return true
+        }
+        if (code == AxshConstants.TRANSACTION_GET_CLIENT_CAPABILITY) {
+            data.enforceInterface(BINDER_DESCRIPTOR)
+            val targetUid = data.readInt()
+            val cap = getClientCapability(targetUid)
+            reply!!.writeNoException()
+            reply.writeStrongBinder(cap)
             return true
         }
         return super.onTransact(code, data, reply, flags)
@@ -1023,6 +1151,9 @@ open class AxeronService :
         }
 
         configManager.update(uid, null, mask, value)
+        if ((mask and ConfigManager.MASK_PERMISSION) != 0 && (value and ConfigManager.FLAG_ALLOWED) == 0) {
+            axshServer?.closeChannels(uid)
+        }
 
         if (newlyAllowed) {
             PackageManagerApis.getPackagesForUidNoThrow(uid)?.forEach { packageName ->

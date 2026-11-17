@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
@@ -12,6 +13,122 @@
 #include <unistd.h>
 
 namespace axsh {
+
+namespace {
+
+// Abstract namespace: leading NUL, then the name. No filesystem entry, no label to create.
+bool abstract_address(const char* name, sockaddr_un* addr, socklen_t* len) {
+    const size_t name_len = std::strlen(name);
+    if (name_len + 1 > sizeof(addr->sun_path)) {
+        errno = ENAMETOOLONG;
+        return false;
+    }
+    *addr = {};
+    addr->sun_family = AF_UNIX;
+    std::memcpy(addr->sun_path + 1, name, name_len);
+    *len = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 + name_len);
+    return true;
+}
+
+int connect_abstract(const char* name) {
+    sockaddr_un addr;
+    socklen_t len;
+    if (!abstract_address(name, &addr, &len)) return -1;
+
+    int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return -1;
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), len) != 0) {
+        const int err = errno;
+        ::close(fd);
+        errno = err;
+        return -1;
+    }
+    return fd;
+}
+
+void broker_name(char* out, size_t size) {
+    std::snprintf(out, size, "%s%u", BROKER_PREFIX, static_cast<unsigned>(::getuid()));
+}
+
+}  // namespace
+
+// The server's socket name as the broker or bootstrap left it, or false (errno ENOENT) if none.
+static bool read_server_name(char* out, size_t size) {
+    const char* dir = ::getenv("TMPDIR");
+    char path[PATH_MAX];
+    if (dir == nullptr || *dir == '\0' ||
+        std::snprintf(path, sizeof(path), "%s/%s", dir, SERVER_NAME_FILE) >= static_cast<int>(sizeof(path))) {
+        errno = ENOENT;
+        return false;
+    }
+    const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    const ssize_t n = ::read(fd, out, size - 1);
+    ::close(fd);
+    if (n <= 0) {
+        errno = ENOENT;
+        return false;
+    }
+    out[n] = '\0';
+    return true;
+}
+
+int connect_server() {
+    char name[64];
+    if (!read_server_name(name, sizeof(name))) return -1;
+    // A stale name (the server started again since) finds no listener: the caller falls back
+    // to the broker, which leaves the new one.
+    const int fd = connect_abstract(name);
+    if (fd < 0) return -1;
+
+    // First come, first served here too: an app could take the name before the server does and
+    // get our stdio. The server runs as root or shell only, which no app can be.
+    ucred cred{};
+    socklen_t cred_len = sizeof(cred);
+    if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0 ||
+        (cred.uid != 0 && cred.uid != 2000)) {
+        ::close(fd);
+        errno = EPERM;
+        return -1;
+    }
+    return fd;
+}
+
+int connect_broker() {
+    char name[32];
+    broker_name(name, sizeof(name));
+
+    const int fd = connect_abstract(name);
+    if (fd < 0) return -1;
+
+    // Abstract names are first come, first served: make sure we hand our stdio to our own app.
+    ucred cred{};
+    socklen_t cred_len = sizeof(cred);
+    if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0 || cred.uid != ::getuid()) {
+        ::close(fd);
+        errno = EPERM;
+        return -1;
+    }
+    return fd;
+}
+
+int listen_broker() {
+    char name[32];
+    broker_name(name, sizeof(name));
+    sockaddr_un addr;
+    socklen_t len;
+    if (!abstract_address(name, &addr, &len)) return -1;
+
+    int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return -1;
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), len) != 0 || ::listen(fd, 16) != 0) {
+        const int err = errno;
+        ::close(fd);
+        errno = err;
+        return -1;
+    }
+    return fd;
+}
 
 namespace {
 

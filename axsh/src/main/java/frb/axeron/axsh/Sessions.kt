@@ -1,8 +1,10 @@
 package frb.axeron.axsh
 
+import android.net.LocalServerSocket
 import android.net.LocalSocket
 import android.os.ParcelFileDescriptor
 import android.os.RemoteException
+import android.os.SystemClock
 import android.system.ErrnoException
 import android.system.Os
 import android.util.Log
@@ -13,12 +15,14 @@ import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /**
- * Serves one native axsh client: reads its handshake and pipes from the socket, starts the shell
- * on them through the server's [IAxshLauncher], then relays window changes in and the exit code
- * out. Wire format: `src/main/cpp/axsh_protocol.h`.
+ * Serves native axsh clients on the server's abstract socket (AxshServer), an app's broker,
+ * or Bootstrap: reads handshake and pipes from the socket, starts the shell on them through
+ * the server's [IAxshLauncher], then relays window changes in and the exit code out.
+ * Wire format: `src/main/cpp/axsh_protocol.h`.
  */
 class Sessions(private val host: Host) {
 
@@ -27,7 +31,11 @@ class Sessions(private val host: Host) {
 
         fun refuse(uid: Int, pid: Int): String?
 
+        fun ignore(uid: Int, pid: Int): Boolean = false
+
         fun launcher(): IAxshLauncher?
+
+        fun launcher(uid: Int): IAxshLauncher? = launcher()
     }
 
     companion object {
@@ -94,11 +102,65 @@ class Sessions(private val host: Host) {
 
     private val tag get() = host.tag
 
+    @Volatile
+    private var listener: LocalServerSocket? = null
+
+    /** Listens on the abstract socket [name], one thread per client. False if it can't bind. */
+    @Synchronized
+    fun listen(name: String): Boolean {
+        if (listener != null) return true
+        val socket = try {
+            LocalServerSocket(name)
+        } catch (e: IOException) {
+            Log.e(tag, "can't bind @$name", e)
+            return false
+        }
+        listener = socket
+        thread(name = "axsh-accept", isDaemon = true) { acceptLoop(socket) }
+        Log.i(tag, "listening on @$name")
+        return true
+    }
+
+    @Synchronized
+    fun stop() {
+        try {
+            listener?.close()
+        } catch (_: IOException) {
+        }
+        listener = null
+    }
+
+    private fun acceptLoop(socket: LocalServerSocket) {
+        while (true) {
+            val client = try {
+                socket.accept()
+            } catch (e: IOException) {
+                if (listener === socket) Log.w(tag, "accept failed", e)
+                break
+            }
+            thread(name = "axsh-session", isDaemon = true) { serve(client) }
+        }
+    }
+
+    private val activeCount = AtomicInteger(0)
+
+    @Volatile
+    private var lastSessionEnd = SystemClock.elapsedRealtime()
+
+    val active: Int get() = activeCount.get()
+
+    val idleMillis: Long
+        get() = if (active > 0) 0 else SystemClock.elapsedRealtime() - lastSessionEnd
+
     fun serve(socket: LocalSocket) {
+        activeCount.incrementAndGet()
         try {
             socket.use { serveSession(it) }
         } catch (e: Throwable) {
             Log.w(tag, "session failed", e)
+        } finally {
+            lastSessionEnd = SystemClock.elapsedRealtime()
+            activeCount.decrementAndGet()
         }
     }
 
@@ -113,6 +175,11 @@ class Sessions(private val host: Host) {
         }
         val uid = credentials?.uid ?: -1
         val pid = credentials?.pid ?: -1
+
+        if (host.ignore(uid, pid)) {
+            Log.i(tag, "uid=$uid pid=$pid ignored")
+            return
+        }
 
         val request = readRequest(input)
         val received = socket.ancillaryFileDescriptors.orEmpty()
@@ -133,7 +200,7 @@ class Sessions(private val host: Host) {
                 return
             }
 
-            val launcher = host.launcher()
+            val launcher = host.launcher(uid)
             if (launcher == null) {
                 writeStatus(output, STATUS_ERROR, "AxManager server is not running")
                 return

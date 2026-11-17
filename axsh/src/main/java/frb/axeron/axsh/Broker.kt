@@ -6,16 +6,19 @@ import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Parcel
+import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.os.SystemClock
+import android.system.Os
 import android.util.Log
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Serves the bootstrap's one session: asks the manager for the server binder with an
- * `AxRuntime.REQUEST_BINDER` broadcast (the same request axerish makes), then takes the
- * [IAxshLauncher] from it. Only this app's own processes may use it.
+ * Serves the bootstrap's session: asks the manager for this uid's server capability with an
+ * `AxRuntime.REQUEST_BINDER` broadcast, caches the server's abstract socket name (for direct
+ * root-mode connections), and provides an `openChannel` pipe for the native `--axsh-daemon`.
  */
 object Broker : Sessions.Host {
 
@@ -24,6 +27,7 @@ object Broker : Sessions.Host {
     private const val ACTION_REQUEST_BINDER = "AxRuntime.REQUEST_BINDER"
     private const val MANAGER_PACKAGE = AxshConstants.MANAGER_PACKAGE
     private const val BINDER_TIMEOUT_MS = 5_000L
+    private const val SERVER_NAME_FILE = ".axsh-server"
 
     private val sessions = Sessions(this)
 
@@ -33,9 +37,26 @@ object Broker : Sessions.Host {
     @Volatile
     private var cached: IAxshLauncher? = null
 
+    fun socketName(uid: Int = Process.myUid()): String = "axsh.$uid"
+
     internal fun serveOne(socket: LocalSocket, sender: (Intent) -> Unit) {
         sendRequest = sender
         sessions.serve(socket)
+    }
+
+    internal fun listen(): Boolean = sessions.listen(socketName())
+
+    internal fun stop() = sessions.stop()
+
+    internal val activeSessions: Int get() = sessions.active
+
+    internal val idleMillis: Long get() = sessions.idleMillis
+
+    internal fun openChannel(): ParcelFileDescriptor? = try {
+        launcher()?.openAxshChannel()
+    } catch (e: Exception) {
+        Log.w(tag, "openAxshChannel failed", e)
+        null
     }
 
     override fun refuse(uid: Int, pid: Int): String? =
@@ -45,7 +66,23 @@ object Broker : Sessions.Host {
     override fun launcher(): IAxshLauncher? {
         cached?.takeIf { it.asBinder().pingBinder() }?.let { return it }
         val service = requestBinder() ?: return null
-        return fetchLauncher(service)?.also { cached = it }
+        return fetchLauncher(service)?.also {
+            cached = it
+            cacheSocketName(it)
+        }
+    }
+
+    private fun cacheSocketName(launcher: IAxshLauncher) {
+        val dir = System.getenv("TMPDIR")?.takeIf { it.isNotEmpty() } ?: return
+        try {
+            val name = launcher.axshSocketName ?: return
+            val tmp = File(dir, "$SERVER_NAME_FILE.tmp")
+            tmp.writeText(name)
+            Os.chmod(tmp.path, "600".toInt(8))
+            if (!tmp.renameTo(File(dir, SERVER_NAME_FILE))) tmp.delete()
+        } catch (e: Exception) {
+            Log.i(tag, "no server socket name to leave: ${e.message ?: e}")
+        }
     }
 
     private fun fetchLauncher(service: IBinder): IAxshLauncher? {
@@ -83,7 +120,10 @@ object Broker : Sessions.Host {
             .setPackage(MANAGER_PACKAGE)
             .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
             .addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
-            .putExtra("data", Bundle().apply { putBinder("binder", receiver) })
+            .putExtra("data", Bundle().apply {
+                putBinder("binder", receiver)
+                putInt(AxshConstants.EXTRA_UID, Process.myUid())
+            })
         try {
             val sender = sendRequest ?: return null
             sender(intent)

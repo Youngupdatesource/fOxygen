@@ -25,6 +25,7 @@ import frb.axeron.api.AxeronCommandSession
 import frb.axeron.api.AxeronInfo
 import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.core.Starter
+import frb.axeron.manager.adb.ActivationLog
 import frb.axeron.manager.adb.AdbStarter
 import frb.axeron.manager.adb.AdbStarter.stopTcp
 import frb.axeron.manager.AxeronApplication.Companion.axeronApp
@@ -291,21 +292,31 @@ class ActivateViewModel : ViewModel() {
         runCatching {
             if (tryActivate) return@withContext ACTIVATE_PROCESS
             setTryToActivate(true)
+            ActivationLog.begin("Root activation")
+            ActivationLog.info("Requesting root access…")
 
             if (!Shell.getShell().isRoot) {
+                ActivationLog.error("Root access wasn't granted (no su, or the request was denied)")
                 Shell.getCachedShell()?.close()
                 return@withContext ACTIVATE_FAILED
             }
+            ActivationLog.success("Root access granted")
+            ActivationLog.info("Running the fOxygen starter…")
 
             val result = Shell.cmd(Starter.internalCommand).exec()
+            result.out.forEach(ActivationLog::output)
+            result.err.forEach(ActivationLog::output)
             if (result.isSuccess) {
+                ActivationLog.success("Starter finished")
                 AxeronSettings.setLastLaunchMode(AxeronSettings.LaunchMethod.ROOT)
                 ACTIVATE_SUCCESS
             } else {
+                ActivationLog.error("Starter exited with code ${result.code}")
                 ACTIVATE_FAILED
             }
         }.getOrElse {
             it.printStackTrace()
+            ActivationLog.error("Root activation failed", it)
             ACTIVATE_FAILED
         }.also {
             Shell.getCachedShell()?.close()
