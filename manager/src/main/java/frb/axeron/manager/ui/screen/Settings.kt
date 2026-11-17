@@ -355,6 +355,7 @@ fun SettingsScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelG
 //                    )
 //                }
 
+                val context = LocalContext.current
                 val canEditSettings = axeronRunning ||
                     SettingsAccess.canWriteSecure(context) ||
                     SettingsAccess.canWriteSystem(context)
