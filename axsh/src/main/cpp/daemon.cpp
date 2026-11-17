@@ -11,8 +11,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#ifdef DEBUG
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "AxshDaemon", __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, "AxshDaemon", __VA_ARGS__)
+#else
+#define LOGI(...) ((void)0)
+#define LOGW(...) ((void)0)
+#endif
 
 namespace axsh {
 

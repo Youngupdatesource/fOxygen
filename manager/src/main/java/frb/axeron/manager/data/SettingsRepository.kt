@@ -217,7 +217,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
             val process = Axeron.newProcess(AxeronPluginService.RESETPROP)
             process.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
-                    val match = PROP_LINE.find(line)
+                    val match = Regex("\\[(.+?)]: \\[(.*?)]").find(line)
                     if (match != null) {
                         val (key, value) = match.destructured
                         map[key] = value

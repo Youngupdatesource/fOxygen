@@ -2,18 +2,15 @@
 #define LOGGING_H
 
 #include <cerrno>
+#include <cstring>
 #include "android/log.h"
 
 #ifndef LOG_TAG
 #define LOG_TAG    "Axeron"
 #endif
 
-#ifndef NO_LOG
-#ifndef NO_DEBUG_LOG
+#if defined(DEBUG) && !defined(NO_LOG)
 #define LOGD(...)  __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#else
-#define LOGD(...)
-#endif
 #define LOGV(...)  __android_log_print(ANDROID_LOG_VERBOSE, LOG_TAG, __VA_ARGS__)
 #define LOGI(...)  __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...)  __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
@@ -27,4 +24,5 @@
 #define LOGE(...)
 #define PLOGE(fmt, args...)
 #endif
+
 #endif // LOGGING_H

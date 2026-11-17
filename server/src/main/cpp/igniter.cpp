@@ -64,6 +64,7 @@ std::string PLUGINS_DIR;
 std::string PLUGINS_UPDATE_DIR;
 std::string AXERONXBIN;
 std::string LOG_DIR;
+bool DEBUG_MODE = false;
 
 // ===============================
 // OUTPUT
@@ -213,7 +214,7 @@ pid_t spawn(const Argv &argv, const char *marker_value, const char *out_path) {
         sigprocmask(SIG_SETMASK, &none, nullptr);
 
         int in = open("/dev/null", O_RDONLY);
-        int out = open(out_path ? out_path : "/dev/null", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        int out = out_path ? open(out_path, O_WRONLY | O_CREAT | O_TRUNC, 0644) : open("/dev/null", O_WRONLY);
         if (out < 0) out = open("/dev/null", O_WRONLY);
         if (in >= 0) dup2(in, 0);
         if (out >= 0) {
@@ -704,7 +705,7 @@ std::vector<Argv> shell_commands(bool standalone, const std::string &script) {
 // hangs the script. Waits at most SCRIPT_TIMEOUT_S.
 void run_script(const std::string &name, const std::string &script, const std::string &kind) {
     std::string log = LOG_DIR + "/" + name + "." + kind + ".log";
-    const char *out = (is_dir(LOG_DIR) || (mkdirs(LOG_DIR), is_dir(LOG_DIR))) ? log.c_str() : nullptr;
+    const char *out = (DEBUG_MODE && (is_dir(LOG_DIR) || (mkdirs(LOG_DIR), is_dir(LOG_DIR)))) ? log.c_str() : nullptr;
     say(" - Running %s.sh of %s (up to %ds)", kind.c_str(), name.c_str(), SCRIPT_TIMEOUT_S);
     for (const auto &command : shell_commands(is_standalone(script), script)) {
         pid_t pid = spawn(command, name.c_str(), out);
@@ -974,6 +975,7 @@ int igniter_main(int argc, char **argv) {
         return 0;
     }
 
+    DEBUG_MODE = (argc > 1 && !strcmp(argv[1], "true"));
     prctl(PR_SET_NAME, "axeron_igniter");
     say("AXERON Plugin Manager (%s)", VERSION);
 

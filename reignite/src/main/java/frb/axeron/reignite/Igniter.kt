@@ -306,7 +306,7 @@ object Igniter {
      */
     private fun runScript(name: String, script: File, kind: String) {
         val log = File(LOG_DIR, "$name.$kind.log")
-        val out = if (LOG_DIR.isDirectory || LOG_DIR.mkdirs()) log else File("/dev/null")
+        val out = if (DEBUG && (LOG_DIR.isDirectory || LOG_DIR.mkdirs())) log else File("/dev/null")
         // Before it runs: the line stays the current one (and its time runs) while it blocks.
         println(" - Running $kind.sh of $name (up to ${SCRIPT_TIMEOUT_S}s)")
         for (command in shellCommands(isStandalone(script), script)) {

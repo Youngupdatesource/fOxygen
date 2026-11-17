@@ -79,3 +79,17 @@
 
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+-assumenosideeffects class android.util.Log {
+    public static *** v(...);
+    public static *** d(...);
+    public static *** i(...);
+    public static *** w(...);
+}
+
+-assumenosideeffects class frb.axeron.server.util.Logger {
+    public *** v(...);
+    public *** d(...);
+    public *** i(...);
+    public *** w(...);
+}

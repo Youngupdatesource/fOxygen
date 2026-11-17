@@ -16,7 +16,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
@@ -63,8 +62,7 @@ fun PluginList(
     onClickModule: (plugin: PluginInfo) -> Unit,
     context: Context,
     snackBarHost: SnackbarHostState,
-    listState: LazyListState,
-    scrollBehavior: TopAppBarScrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
+    listState: LazyListState
 ) {
     val failedEnable = stringResource(R.string.failed_enable_plugin)
     val failedDisable = stringResource(R.string.failed_disable_plugin)
@@ -223,7 +221,7 @@ fun PluginList(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(scrollBehavior.nestedScrollConnection),
+                .nestedScroll(TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState()).nestedScrollConnection),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(
                 start = 16.dp,
@@ -248,11 +246,7 @@ fun PluginList(
                 }
 
                 else -> {
-                    itemsIndexed(
-                        items = viewModel.pluginList,
-                        key = { _, plugin -> plugin.prop.id },
-                        contentType = { _, _ -> "plugin_item" }
-                    ) { index, plugin ->
+                    itemsIndexed(viewModel.pluginList) { index, plugin ->
                         val scope = rememberCoroutineScope()
                         val updatedModule by produceState(
                             key1 = plugin.prop.id,

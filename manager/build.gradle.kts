@@ -61,6 +61,12 @@ android {
         buildConfig = true
         compose = true
     }
+
+    packaging {
+        jniLibs {
+            keepDebugSymbols += "**/libaxreignite.so"
+        }
+    }
 }
 
 dependencies {

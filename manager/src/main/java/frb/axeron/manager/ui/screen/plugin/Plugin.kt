@@ -271,8 +271,7 @@ fun PluginScreen(navigator: DestinationsNavigator, viewModelGlobal: ViewModelGlo
             },
             context = context,
             snackBarHost = snackBarHost,
-            listState = listState,
-            scrollBehavior = scrollBehavior
+            listState = listState
         )
     }
 }

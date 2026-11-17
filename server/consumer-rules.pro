@@ -54,7 +54,10 @@
 }
 
 -assumenosideeffects class frb.axeron.server.util.Logger {
+    public *** v(...);
     public *** d(...);
+    public *** i(...);
+    public *** w(...);
 }
 
 # Hindari penghapusan method native

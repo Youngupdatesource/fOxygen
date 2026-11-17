@@ -236,7 +236,9 @@ class AxActivity : ComponentActivity() {
     private var contentReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Play the entrance animation strictly once per app process launch.
+        // The entrance is played whenever the app is opened (a new process, or a new window with
+        // no saved state); a window that is only recreated by a rotation / theme change has
+        // nothing to replay: everything is simply there.
         val firstInProcess = !createdInThisProcess
         createdInThisProcess = true
         if (firstInProcess && savedInstanceState == null) StartupMotion.begin()
@@ -276,14 +278,12 @@ class AxActivity : ComponentActivity() {
                 val session = StartupMotion.session
                 LaunchedEffect(session) {
                     contentReady = true
-                    if (StartupMotion.played) return@LaunchedEffect
-                    delay(100L)
+                    if (StartupMotion.played) return@LaunchedEffect // skip(): nothing to play
+                    delay(150L)
                     StartupMotion.revealed = true
-                    // Wait one frame so the initial screen's mounted items start their animation,
-                    // then immediately lock played = true so tapping the bottom pill never replays it.
                     withFrameNanos { }
                     StartupMotion.played = true
-                    delay(650L)
+                    delay(2500L)
                     StartupMotion.settled = true
                 }
             }
@@ -389,10 +389,7 @@ class AxActivity : ComponentActivity() {
         }
 
         // Urutan tab yang sedang tampil di bottom bar (tab needAxeron disembunyikan saat server mati).
-        val isServerRunning = axeronInfo.isRunning()
-        val swipeTabs = remember(isServerRunning) {
-            BottomBarDestination.entries.filter { isServerRunning || !it.needAxeron }
-        }
+        val swipeTabs = BottomBarDestination.entries.filter { axeronInfo.isRunning() || !it.needAxeron }
         val currentTabIndex = swipeTabs.indexOfFirst { it.direction.route == currentDestination?.route }
 
         val showBottomBar = when (currentDestination?.route) {
@@ -705,13 +702,12 @@ class AxActivity : ComponentActivity() {
         ) {
             Surface(
                 shape = CircleShape,
-                color = capsuleContainerColor(),
+                color = capsuleContainerColor().copy(alpha = fade),
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 shadowElevation = CapsuleShadow
             ) {
-                val running = axeronServerInfo.isRunning()
-                val tabs = remember(running) {
-                    BottomBarDestination.entries.filter { running || !it.needAxeron }
+                val tabs = BottomBarDestination.entries.filter {
+                    axeronServerInfo.isRunning() || !it.needAxeron
                 }
                 // key(): state tiap tab tetap stabil saat tab muncul/hilang (server hidup/mati).
                 val selectedStates = tabs.map { tab ->

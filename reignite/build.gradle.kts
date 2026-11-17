@@ -5,6 +5,11 @@ plugins {
 
 android {
     namespace = "frb.axeron.reignite"
+    packaging {
+        jniLibs {
+            keepDebugSymbols += "**/libaxreignite.so"
+        }
+    }
 }
 
 dependencies {

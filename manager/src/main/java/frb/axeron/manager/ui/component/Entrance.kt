@@ -16,25 +16,20 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
 /**
- * The cue for the app's entrance, played strictly once when the app process is opened.
- *
- * Until [revealed] the things marked with [riseIn] on the initial screen wait out of sight;
- * AxActivity flips [revealed] right after the splash screen is removed and immediately marks
- * [played] once the initial frame's items have claimed their animation, so switching tabs via
- * the bottom pill or navigating later never replays the entrance animation.
+ * The cue for the app's entrance, played once when the app process is opened.
  */
 object StartupMotion {
-    /** Bumps when the initial entrance session starts. */
+    /** Bumps every time the entrance starts over; items hide and rise in again. */
     var session by mutableIntStateOf(0)
         internal set
 
-    /** True from the moment the current entrance should start rising in. */
+    /** True from the moment the current entrance should start to come in. */
     var revealed by mutableStateOf(false)
         internal set
 
     /**
-     * True as soon as the initial screen has started its entrance (or when the user interacts
-     * with navigation). Any screen or tab composed after this starts in place (1f) with no replay.
+     * True once the window for the entrance is over. A screen that shows up later, or comes back
+     * to, is simply there: nothing is replayed.
      */
     @Volatile
     var played = false
@@ -47,7 +42,7 @@ object StartupMotion {
     var settled by mutableStateOf(false)
         internal set
 
-    /** Starts the entrance once for a fresh app launch. */
+    /** Starts the entrance over: everything marked with [riseIn] hides and rises in again. */
     internal fun begin() {
         played = false
         settled = false
@@ -62,7 +57,7 @@ object StartupMotion {
         revealed = true
     }
 
-    /** No entrance (e.g. activity recreation / rotation / already played in this process). */
+    /** No entrance (for example the window was only recreated by a rotation): all is in place. */
     internal fun skip() {
         played = true
         settled = true
@@ -70,17 +65,13 @@ object StartupMotion {
     }
 }
 
-private const val BASE_DELAY_MS = 70L
+private const val BASE_DELAY_MS = 90L
 
-/**
- * Rises into place on the initial app launch only. Once settled (or on any tab opened after the
- * initial launch frame), returns [this] directly without attaching a redundant graphicsLayer.
- */
 @Composable
 fun Modifier.riseIn(
     index: Int,
     distance: Dp = 56.dp,
-    stepMs: Long = 50L,
+    stepMs: Long = 60L,
 ): Modifier {
     val session = StartupMotion.session
     val revealed = StartupMotion.revealed
@@ -98,18 +89,14 @@ fun Modifier.riseIn(
             delay(BASE_DELAY_MS + index * stepMs)
             progress.animateTo(
                 targetValue = 1f,
-                animationSpec = spring(dampingRatio = 0.82f, stiffness = 240f)
+                animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f)
             )
         }
     }
 
-    if (StartupMotion.played && StartupMotion.session == ownSession && progress.value >= 0.999f) {
-        return this
-    }
-
     return this.graphicsLayer {
         val p = if (StartupMotion.session != ownSession && !StartupMotion.played) 0f else progress.value
-        alpha = (p * 2f).coerceIn(0f, 1f)
+        alpha = (p * 2f).coerceIn(0f, 1f) // fully there by the time it is half way up
         translationY = (1f - p) * distance.toPx()
         val s = 0.97f + 0.03f * p.coerceIn(0f, 1f)
         scaleX = s

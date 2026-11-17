@@ -460,7 +460,6 @@ open class AxeronService :
         // not in front of the manager's binder and not on the main looper.
         mainHandler.post {
             sendBinderToManager(this)
-            DaemonGuard.start()
             Thread({
                 try {
                     shizukuService?.let { sendBinderToShizukuManager(it.asBinder()) }
