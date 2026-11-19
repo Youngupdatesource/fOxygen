@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -45,6 +44,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.DividerDefaults
@@ -70,6 +70,8 @@ import android.content.ClipboardManager
 import android.content.ClipData
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -184,129 +186,140 @@ fun PrivilegeScreen(
                     val uid = app.packageInfo.applicationInfo!!.uid
                     var showSettings by remember(app.packageName) { mutableStateOf(false) }
 
-                    ListItem(
+                    Row(
                         modifier = Modifier
+                            .fillMaxWidth()
                             .animateItem()
                             // Rises in on the app's entrance (first rows only; later ones just appear).
                             .riseIn(index = index.coerceAtMost(8), distance = 32.dp)
-                            .clickable(enabled = app.isAdded) { showSettings = true }
-                            .padding(end = 6.dp, top = 6.dp),
-                        headlineContent = {
-                            Text(
-                                text = app.label,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        },
-                        supportingContent = {
-                            Text(
-                                text = app.packageName,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        },
-                        leadingContent = {
+                            .padding(start = 8.dp, end = 22.dp, top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable(enabled = app.isAdded) { showSettings = true }
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
                             AppIcon(
- packageInfo = app.packageInfo,
- contentDescription = app.label,
- modifier = Modifier
+                                packageInfo = app.packageInfo,
+                                contentDescription = app.label,
+                                modifier = Modifier
                                     .padding(4.dp)
                                     .width(48.dp)
                                     .height(48.dp)
-)
-                        },
-                        trailingContent = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                if (app.hasTermuxLib) {
-                                    val context = LocalContext.current
-                                    val scope = rememberCoroutineScope()
-                                    val failedText = stringResource(R.string.privilege_open_terminal_failed)
-                                    val copiedText = stringResource(R.string.privilege_axsh_copied)
-                                    val notReadyText = stringResource(R.string.privilege_axsh_not_ready)
-
-                                    IconButton(onClick = { showSettings = true }) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Terminal,
-                                            contentDescription = stringResource(R.string.privilege_open_terminal)
-                                        )
-                                    }
-
-                                    if (showSettings) {
-                                        TerminalAppDialog(
-                                            app = app,
-                                            showRootless = privilegeViewModel.isRootMode,
-                                            initialRootless = privilegeViewModel.axshRootless(uid),
-                                            onRootlessChange = { privilegeViewModel.setAxshRootless(uid, it) },
-                                            onDismissRequest = { showSettings = false },
-                                            onLaunch = {
-                                                showSettings = false
-                                                scope.launch {
-                                                    val ready = withContext(Dispatchers.IO) {
-                                                        AxshLauncher.allowManageStorage(context, app.packageName)
-                                                        AxshLauncher.ensure(context)
-                                                    }
-                                                    if (!ready) {
-                                                        Toast.makeText(context, notReadyText, Toast.LENGTH_SHORT).show()
-                                                        return@launch
-                                                    }
-                                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                                    clipboard?.setPrimaryClip(
-                                                        ClipData.newPlainText("axsh", AxshLauncher.RUN_COMMAND)
-                                                    )
-                                                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                                                        Toast.makeText(context, copiedText, Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    val intent = context.packageManager
-                                                        .getLaunchIntentForPackage(app.packageName)
-                                                    if (intent == null) {
-                                                        Toast.makeText(context, failedText, Toast.LENGTH_SHORT).show()
-                                                    } else {
-                                                        runCatching {
-                                                            context.startActivity(
-                                                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                            )
-                                                        }.onFailure {
-                                                            Toast.makeText(context, failedText, Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
-                                } else if (app.isAdded && showSettings) {
-                                    RootlessAppDialog(
-                                        app = app,
-                                        showRootless = privilegeViewModel.isRootMode,
-                                        initialRootless = privilegeViewModel.axshRootless(uid),
-                                        onRootlessChange = { privilegeViewModel.setAxshRootless(uid, it) },
-                                        onDismissRequest = { showSettings = false }
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = app.label,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = app.packageName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (app.hasTermuxLib) {
+                                IconButton(onClick = { showSettings = true }) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Terminal,
+                                        contentDescription = stringResource(R.string.privilege_open_terminal)
                                     )
                                 }
-                                if (app.isAdded) {
-                                    VerticalDivider(
-                                        modifier = Modifier
-                                            .padding(end = 4.dp)
-                                            .height(28.dp)
-                                            .width(DividerDefaults.Thickness),
-                                        color = MaterialTheme.colorScheme.outlineVariant
-                                    )
-                                }
-                                AxSwitch(
-                                    checked = app.isAdded,
-                                    onCheckedChange = { checked ->
-                                        if (checked) {
-                                            privilegeViewModel.grant(uid)
-                                        } else {
-                                            showSettings = false
-                                            privilegeViewModel.revoke(uid)
-                                        }
-                                    }
+                            }
+                            if (app.isAdded) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = stringResource(R.string.privilege_app_settings),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
-                    )
+                        if (app.isAdded) {
+                            VerticalDivider(
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp)
+                                    .height(28.dp)
+                                    .width(DividerDefaults.Thickness),
+                                color = MaterialTheme.colorScheme.outlineVariant
+                            )
+                        } else {
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        AxSwitch(
+                            checked = app.isAdded,
+                            onCheckedChange = { checked ->
+                                if (checked) {
+                                    privilegeViewModel.grant(uid)
+                                } else {
+                                    showSettings = false
+                                    privilegeViewModel.revoke(uid)
+                                }
+                            }
+                        )
+                    }
+
+                    if (app.hasTermuxLib && showSettings) {
+                        val context = LocalContext.current
+                        val scope = rememberCoroutineScope()
+                        val failedText = stringResource(R.string.privilege_open_terminal_failed)
+                        val copiedText = stringResource(R.string.privilege_axsh_copied)
+                        val notReadyText = stringResource(R.string.privilege_axsh_not_ready)
+
+                        TerminalAppDialog(
+                            app = app,
+                            showRootless = privilegeViewModel.isRootMode,
+                            initialRootless = privilegeViewModel.axshRootless(uid),
+                            onRootlessChange = { privilegeViewModel.setAxshRootless(uid, it) },
+                            onDismissRequest = { showSettings = false },
+                            onLaunch = {
+                                showSettings = false
+                                scope.launch {
+                                    val ready = withContext(Dispatchers.IO) {
+                                        AxshLauncher.allowManageStorage(context, app.packageName)
+                                        AxshLauncher.ensure(context)
+                                    }
+                                    if (!ready) {
+                                        Toast.makeText(context, notReadyText, Toast.LENGTH_SHORT).show()
+                                        return@launch
+                                    }
+                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                    clipboard?.setPrimaryClip(
+                                        ClipData.newPlainText("axsh", AxshLauncher.RUN_COMMAND)
+                                    )
+                                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                                        Toast.makeText(context, copiedText, Toast.LENGTH_SHORT).show()
+                                    }
+                                    val intent = context.packageManager
+                                        .getLaunchIntentForPackage(app.packageName)
+                                    if (intent == null) {
+                                        Toast.makeText(context, failedText, Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        runCatching {
+                                            context.startActivity(
+                                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            )
+                                        }.onFailure {
+                                            Toast.makeText(context, failedText, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                    } else if (!app.hasTermuxLib && app.isAdded && showSettings) {
+                        RootlessAppDialog(
+                            app = app,
+                            showRootless = privilegeViewModel.isRootMode,
+                            initialRootless = privilegeViewModel.axshRootless(uid),
+                            onRootlessChange = { privilegeViewModel.setAxshRootless(uid, it) },
+                            onDismissRequest = { showSettings = false }
+                        )
+                    }
                 }
             }
 
