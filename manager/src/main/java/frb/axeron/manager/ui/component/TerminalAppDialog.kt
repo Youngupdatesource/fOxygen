@@ -33,16 +33,72 @@ import frb.axeron.manager.ui.theme.cardContainerColor
 import frb.axeron.manager.ui.viewmodel.AppsViewModel
 
 @Composable
-fun TerminalAppDialog(
+private fun AppSettingsHeader(app: AppsViewModel.AppInfo) {
+    Text(
+        text = stringResource(R.string.privilege_app_settings),
+        style = MaterialTheme.typography.titleLarge
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        AppIcon(
+            packageInfo = app.packageInfo,
+            contentDescription = app.label,
+            modifier = Modifier.size(56.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = app.label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = app.packageName,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun RootlessDebuggingRow(
+    descriptionRes: Int,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.privilege_rootless_debugging),
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                text = stringResource(descriptionRes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+fun RootlessAppDialog(
     app: AppsViewModel.AppInfo,
     showRootless: Boolean,
     initialRootless: Boolean,
     onRootlessChange: (Boolean) -> Unit,
-    onDismissRequest: () -> Unit,
-    // Aplikasi dengan libtermux.so: tampilkan perintah axsh + tombol Launch.
-    // Aplikasi lain: hanya opsi Rootless debugging (tanpa perintah/Launch).
-    showTerminal: Boolean = true,
-    onLaunch: () -> Unit = {}
+    onDismissRequest: () -> Unit
 ) {
     var rootless by remember(app.packageName) { mutableStateOf(initialRootless) }
 
@@ -62,86 +118,100 @@ fun TerminalAppDialog(
                 modifier = Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text(
-                    text = stringResource(R.string.privilege_app_settings),
-                    style = MaterialTheme.typography.titleLarge
-                )
+                AppSettingsHeader(app)
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    AppIcon(
-                        packageInfo = app.packageInfo,
-                        contentDescription = app.label,
-                        modifier = Modifier.size(56.dp)
+                if (showRootless) {
+                    RootlessDebuggingRow(
+                        descriptionRes = R.string.privilege_app_rootless_debugging_desc,
+                        checked = rootless,
+                        onCheckedChange = {
+                            rootless = it
+                            onRootlessChange(it)
+                        }
                     )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = app.label,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = app.packageName,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                } else {
+                    Text(
+                        text = stringResource(R.string.privilege_terminal_mode_adb),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
-                if (showTerminal) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.small,
-                        color = MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Text(
-                            text = AxshLauncher.RUN_COMMAND,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(12.dp)
-                        )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismissRequest) {
+                        Text(stringResource(R.string.close))
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TerminalAppDialog(
+    app: AppsViewModel.AppInfo,
+    showRootless: Boolean,
+    initialRootless: Boolean,
+    onRootlessChange: (Boolean) -> Unit,
+    onLaunch: () -> Unit,
+    onDismissRequest: () -> Unit
+) {
+    var rootless by remember(app.packageName) { mutableStateOf(initialRootless) }
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .padding(horizontal = 24.dp)
+                .fillMaxWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = cardContainerColor(),
+            tonalElevation = 0.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                AppSettingsHeader(app)
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        text = AxshLauncher.RUN_COMMAND,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(12.dp)
+                    )
                 }
 
                 if (showRootless) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.privilege_rootless_debugging),
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Text(
-                                text = stringResource(R.string.privilege_rootless_debugging_desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    RootlessDebuggingRow(
+                        descriptionRes = R.string.privilege_rootless_debugging_desc,
+                        checked = rootless,
+                        onCheckedChange = {
+                            rootless = it
+                            onRootlessChange(it)
                         }
-                        Switch(
-                            checked = rootless,
-                            onCheckedChange = {
-                                rootless = it
-                                onRootlessChange(it)
-                            }
-                        )
-                    }
+                    )
                 }
 
                 // Explanation goes below the controls, right above the buttons
                 // (same layout as the WebUI shortcut dialog).
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (showTerminal) {
-                        Text(
-                            text = stringResource(R.string.privilege_terminal_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        text = stringResource(R.string.privilege_terminal_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     if (!showRootless) {
                         Text(
                             text = stringResource(R.string.privilege_terminal_mode_adb),
@@ -159,11 +229,9 @@ fun TerminalAppDialog(
                     TextButton(onClick = onDismissRequest) {
                         Text(stringResource(R.string.close))
                     }
-                    if (showTerminal) {
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = onLaunch) {
-                            Text(stringResource(R.string.privilege_launch))
-                        }
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = onLaunch) {
+                        Text(stringResource(R.string.privilege_launch))
                     }
                 }
             }

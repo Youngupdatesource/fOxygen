@@ -227,6 +227,7 @@
     <string name="privilege_app_settings">Pengaturan app</string>
     <string name="privilege_rootless_debugging">Rootless debugging</string>
     <string name="privilege_rootless_debugging_desc">Jalankan sesi axsh app ini di level Shell (uid 2000, seperti adb shell), bukan root</string>
+    <string name="privilege_app_rootless_debugging_desc">Jalankan perintah app ini di level Shell (uid 2000, seperti adb shell), bukan root</string>
     <string name="privilege_terminal_desc">Membuka app ini dengan shell axsh siap pakai. Luncurkan menyalin perintah di atas ke clipboard; tempel di terminal untuk mendapat shell interaktif penuh (PTY, vi, top, job control) lewat AxManager.</string>
     <string name="privilege_terminal_mode_adb">Server berjalan di mode ADB, jadi sesi sudah berjalan sebagai user shell (uid 2000).</string>
     <string name="privilege_launch">Luncurkan</string>

@@ -46,18 +46,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import android.widget.Toast
+import frb.axeron.manager.ui.component.RootlessAppDialog
 import frb.axeron.manager.ui.component.TerminalAppDialog
 import androidx.compose.material.icons.outlined.Terminal
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.VerticalDivider
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -179,11 +181,15 @@ fun PrivilegeScreen(
                     contentType = { _, _ -> "privilege_app" }
                 ) { index, keyed ->
                     val app = keyed.app
+                    val uid = app.packageInfo.applicationInfo!!.uid
+                    var showSettings by remember(app.packageName) { mutableStateOf(false) }
+
                     ListItem(
                         modifier = Modifier
                             .animateItem()
                             // Rises in on the app's entrance (first rows only; later ones just appear).
                             .riseIn(index = index.coerceAtMost(8), distance = 32.dp)
+                            .clickable(enabled = app.isAdded) { showSettings = true }
                             .padding(end = 6.dp, top = 6.dp),
                         headlineContent = {
                             Text(
@@ -213,89 +219,88 @@ fun PrivilegeScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                val context = LocalContext.current
-                                val scope = rememberCoroutineScope()
-                                val uid = app.packageInfo.applicationInfo!!.uid
-                                var showSettings by remember(app.packageName) { mutableStateOf(false) }
-                                val failedText = stringResource(R.string.privilege_open_terminal_failed)
-                                val copiedText = stringResource(R.string.privilege_axsh_copied)
-                                val notReadyText = stringResource(R.string.privilege_axsh_not_ready)
+                                if (app.hasTermuxLib) {
+                                    val context = LocalContext.current
+                                    val scope = rememberCoroutineScope()
+                                    val failedText = stringResource(R.string.privilege_open_terminal_failed)
+                                    val copiedText = stringResource(R.string.privilege_axsh_copied)
+                                    val notReadyText = stringResource(R.string.privilege_axsh_not_ready)
 
-                                // Tombol opsi (kiri garis pemisah). App dengan libtermux.so tetap
-                                // memakai ikon terminal; app lain memakai ikon opsi untuk membuka
-                                // pengaturan Rootless debugging.
-                                IconButton(onClick = { showSettings = true }) {
-                                    if (app.hasTermuxLib) {
+                                    IconButton(onClick = { showSettings = true }) {
                                         Icon(
                                             imageVector = Icons.Outlined.Terminal,
                                             contentDescription = stringResource(R.string.privilege_open_terminal)
                                         )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Tune,
-                                            contentDescription = stringResource(R.string.privilege_app_settings)
-                                        )
                                     }
-                                }
 
-                                if (showSettings) {
-                                    TerminalAppDialog(
-                                        app = app,
-                                        showTerminal = app.hasTermuxLib,
-                                        showRootless = privilegeViewModel.isRootMode,
-                                        initialRootless = privilegeViewModel.axshRootless(uid),
-                                        onRootlessChange = { privilegeViewModel.setAxshRootless(uid, it) },
-                                        onDismissRequest = { showSettings = false },
-                                        onLaunch = {
-                                            showSettings = false
-                                            scope.launch {
-                                                val ready = withContext(Dispatchers.IO) {
-                                                    AxshLauncher.allowManageStorage(context, app.packageName)
-                                                    AxshLauncher.ensure(context)
-                                                }
-                                                if (!ready) {
-                                                    Toast.makeText(context, notReadyText, Toast.LENGTH_SHORT).show()
-                                                    return@launch
-                                                }
-                                                val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                                clipboard?.setPrimaryClip(
-                                                    ClipData.newPlainText("axsh", AxshLauncher.RUN_COMMAND)
-                                                )
-                                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                                                    Toast.makeText(context, copiedText, Toast.LENGTH_SHORT).show()
-                                                }
-                                                val intent = context.packageManager
-                                                    .getLaunchIntentForPackage(app.packageName)
-                                                if (intent == null) {
-                                                    Toast.makeText(context, failedText, Toast.LENGTH_SHORT).show()
-                                                } else {
-                                                    runCatching {
-                                                        context.startActivity(
-                                                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                        )
-                                                    }.onFailure {
+                                    if (showSettings) {
+                                        TerminalAppDialog(
+                                            app = app,
+                                            showRootless = privilegeViewModel.isRootMode,
+                                            initialRootless = privilegeViewModel.axshRootless(uid),
+                                            onRootlessChange = { privilegeViewModel.setAxshRootless(uid, it) },
+                                            onDismissRequest = { showSettings = false },
+                                            onLaunch = {
+                                                showSettings = false
+                                                scope.launch {
+                                                    val ready = withContext(Dispatchers.IO) {
+                                                        AxshLauncher.allowManageStorage(context, app.packageName)
+                                                        AxshLauncher.ensure(context)
+                                                    }
+                                                    if (!ready) {
+                                                        Toast.makeText(context, notReadyText, Toast.LENGTH_SHORT).show()
+                                                        return@launch
+                                                    }
+                                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                                    clipboard?.setPrimaryClip(
+                                                        ClipData.newPlainText("axsh", AxshLauncher.RUN_COMMAND)
+                                                    )
+                                                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                                                        Toast.makeText(context, copiedText, Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    val intent = context.packageManager
+                                                        .getLaunchIntentForPackage(app.packageName)
+                                                    if (intent == null) {
                                                         Toast.makeText(context, failedText, Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        runCatching {
+                                                            context.startActivity(
+                                                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            )
+                                                        }.onFailure {
+                                                            Toast.makeText(context, failedText, Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
+                                        )
+                                    }
+                                } else if (app.isAdded && showSettings) {
+                                    RootlessAppDialog(
+                                        app = app,
+                                        showRootless = privilegeViewModel.isRootMode,
+                                        initialRootless = privilegeViewModel.axshRootless(uid),
+                                        onRootlessChange = { privilegeViewModel.setAxshRootless(uid, it) },
+                                        onDismissRequest = { showSettings = false }
                                     )
                                 }
-
-                                // Garis pemisah antara tombol opsi dan toggle on/off.
-                                VerticalDivider(
-                                    modifier = Modifier
-                                        .height(28.dp)
-                                        .padding(horizontal = 4.dp),
-                                    color = MaterialTheme.colorScheme.outlineVariant
-                                )
+                                if (app.isAdded) {
+                                    VerticalDivider(
+                                        modifier = Modifier
+                                            .padding(end = 4.dp)
+                                            .height(28.dp)
+                                            .width(DividerDefaults.Thickness),
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+                                }
                                 AxSwitch(
                                     checked = app.isAdded,
                                     onCheckedChange = { checked ->
                                         if (checked) {
-                                            privilegeViewModel.grant(app.packageInfo.applicationInfo!!.uid)
+                                            privilegeViewModel.grant(uid)
                                         } else {
-                                            privilegeViewModel.revoke(app.packageInfo.applicationInfo!!.uid)
+                                            showSettings = false
+                                            privilegeViewModel.revoke(uid)
                                         }
                                     }
                                 )

@@ -595,15 +595,31 @@ open class AxeronService :
     ): IRemoteProcess {
         enforceCallingPermission("newProcess")
 
+        val callingUid = getCallingUid()
+        val argv = cmd?.filterNotNull()?.toTypedArray()
+        val lowered = android.os.Process.myUid() == 0 &&
+            !argv.isNullOrEmpty() &&
+            getFlagsForUidInternal(callingUid, AxshConstants.FLAG_AXSH_ROOTLESS) != 0
+        val command = if (lowered) {
+            val libDir = System.getProperty("axeron.library.path").orEmpty()
+            val helper = File(libDir, AxshConstants.DROP_HELPER)
+            if (!helper.canExecute()) {
+                throw SecurityException("Rootless debugging unavailable: ${AxshConstants.DROP_HELPER} not found in $libDir")
+            }
+            AxshConstants.rootlessArgv(helper.path, argv!!)
+        } else {
+            cmd
+        }
+
         LOGGER.d(
             "newProcess: uid=%d, cmd=%s",
-            getCallingUid(),
-            cmd.contentToString()
+            callingUid,
+            command.contentToString()
         )
 
         val process: Process
         try {
-            process = Runtime.getRuntime().exec(cmd, env, if (dir != null) File(dir) else null)
+            process = Runtime.getRuntime().exec(command, env, if (dir != null) File(dir) else null)
         } catch (e: IOException) {
             throw IllegalStateException(e.message)
         }

@@ -227,6 +227,7 @@
     <string name="privilege_app_settings">应用设置</string>
     <string name="privilege_rootless_debugging">Rootless debugging</string>
     <string name="privilege_rootless_debugging_desc">以 Shell 级别（uid 2000，类似 adb shell）而非 root 运行此应用的 axsh 会话</string>
+    <string name="privilege_app_rootless_debugging_desc">以 Shell 级别（uid 2000，类似 adb shell）而非 root 运行此应用的命令</string>
     <string name="privilege_terminal_desc">打开此应用并准备好 axsh shell。点击启动会将上方命令复制到剪贴板，在终端中粘贴即可通过 AxManager 获得完整的交互式 shell（PTY、vi、top、作业控制）。</string>
     <string name="privilege_terminal_mode_adb">服务运行在 ADB 模式，会话已以 shell 用户（uid 2000）运行。</string>
     <string name="privilege_launch">启动</string>

@@ -227,6 +227,7 @@
     <string name="privilege_app_settings">App settings</string>
     <string name="privilege_rootless_debugging">Rootless debugging</string>
     <string name="privilege_rootless_debugging_desc">Run axsh sessions of this app at the shell level (uid 2000, like adb shell) instead of root</string>
+    <string name="privilege_app_rootless_debugging_desc">Run commands of this app at the shell level (uid 2000, like adb shell) instead of root</string>
     <string name="privilege_terminal_desc">Opens this app with an axsh shell ready. Launch copies the command above to the clipboard; paste it in the terminal to get a full interactive shell (PTY, vi, top, job control) running through AxManager.</string>
     <string name="privilege_terminal_mode_adb">The server runs in ADB mode, so sessions already run as the shell user (uid 2000).</string>
     <string name="privilege_launch">Launch</string>
