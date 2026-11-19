@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -226,7 +227,10 @@ fun PrivilegeScreen(
                                 )
                             }
                             if (app.hasTermuxLib) {
-                                IconButton(onClick = { showSettings = true }) {
+                                IconButton(
+                                    onClick = { showSettings = true },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
                                     Icon(
                                         imageVector = Icons.Outlined.Terminal,
                                         contentDescription = stringResource(R.string.privilege_open_terminal)
@@ -234,11 +238,16 @@ fun PrivilegeScreen(
                                 }
                             }
                             if (app.isAdded && !app.hasTermuxLib) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = stringResource(R.string.privilege_app_settings),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Box(
+                                    modifier = Modifier.size(40.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = stringResource(R.string.privilege_app_settings),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                         if (app.isAdded) {
