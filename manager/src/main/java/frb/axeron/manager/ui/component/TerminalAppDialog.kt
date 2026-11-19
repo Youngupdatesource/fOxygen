@@ -38,8 +38,11 @@ fun TerminalAppDialog(
     showRootless: Boolean,
     initialRootless: Boolean,
     onRootlessChange: (Boolean) -> Unit,
-    onLaunch: () -> Unit,
-    onDismissRequest: () -> Unit
+    onDismissRequest: () -> Unit,
+    // Aplikasi dengan libtermux.so: tampilkan perintah axsh + tombol Launch.
+    // Aplikasi lain: hanya opsi Rootless debugging (tanpa perintah/Launch).
+    showTerminal: Boolean = true,
+    onLaunch: () -> Unit = {}
 ) {
     var rootless by remember(app.packageName) { mutableStateOf(initialRootless) }
 
@@ -87,17 +90,19 @@ fun TerminalAppDialog(
                     }
                 }
 
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Text(
-                        text = AxshLauncher.RUN_COMMAND,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(12.dp)
-                    )
+                if (showTerminal) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = AxshLauncher.RUN_COMMAND,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
                 }
 
                 if (showRootless) {
@@ -130,11 +135,13 @@ fun TerminalAppDialog(
                 // Explanation goes below the controls, right above the buttons
                 // (same layout as the WebUI shortcut dialog).
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = stringResource(R.string.privilege_terminal_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (showTerminal) {
+                        Text(
+                            text = stringResource(R.string.privilege_terminal_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (!showRootless) {
                         Text(
                             text = stringResource(R.string.privilege_terminal_mode_adb),
@@ -152,9 +159,11 @@ fun TerminalAppDialog(
                     TextButton(onClick = onDismissRequest) {
                         Text(stringResource(R.string.close))
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = onLaunch) {
-                        Text(stringResource(R.string.privilege_launch))
+                    if (showTerminal) {
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = onLaunch) {
+                            Text(stringResource(R.string.privilege_launch))
+                        }
                     }
                 }
             }
