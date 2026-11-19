@@ -233,7 +233,7 @@ fun PrivilegeScreen(
                                     )
                                 }
                             }
-                            if (app.isAdded) {
+                            if (app.isAdded && !app.hasTermuxLib) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                     contentDescription = stringResource(R.string.privilege_app_settings),
