@@ -31,11 +31,8 @@ import frb.axeron.server.axsh.AxshServer
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import dev.rikka.tools.refine.Refine
-import frb.axeron.axsh.AxshConstants
-import frb.axeron.axsh.IAxshLauncher
-import frb.axeron.axsh.IAxshProcess
-import frb.axeron.axsh.host.AxshProcess
-import frb.axeron.axsh.host.PtyHost
+import frb.axeron.shell.host.PtyHost
+import frb.axeron.shell.host.ShellProcess
 import frb.axeron.server.ManagerIdentity.MANAGER_APPLICATION_ID
 import frb.axeron.server.ServerConstants.PERMISSION
 import frb.axeron.server.ServerConstants.SHIZUKU_MANAGER_APPLICATION_ID
@@ -73,7 +70,6 @@ import rikka.hidden.compat.PermissionManagerApis
 import rikka.hidden.compat.UserManagerApis
 import rikka.hidden.compat.util.SystemServiceBinder
 import rikka.parcelablelist.ParcelableListSlice
-import rikka.rish.RishConfig
 import java.io.File
 import java.io.IOException
 import java.lang.ref.WeakReference
@@ -95,7 +91,6 @@ open class AxeronService :
         fun main(args: Array<String>) {
             DdmHandleAppName.setAppName("axeron_server", 0)
             ensureCacheDir(android.os.Process.myUid() == 0)
-            RishConfig.setLibraryPath(System.getProperty("axeron.library.path"))
             PtyHost.setLibraryPath(System.getProperty("axeron.library.path"))
             runCatching { PtyHost.loadLibrary() }
                 .onFailure { LOGGER.w("libaxsh_host.so not loaded: $it") }
@@ -599,14 +594,14 @@ open class AxeronService :
         val argv = cmd?.filterNotNull()?.toTypedArray()
         val lowered = android.os.Process.myUid() == 0 &&
             !argv.isNullOrEmpty() &&
-            getFlagsForUidInternal(callingUid, AxshConstants.FLAG_AXSH_ROOTLESS) != 0
+            getFlagsForUidInternal(callingUid, RootlessConstants.FLAG_AXSH_ROOTLESS) != 0
         val command = if (lowered) {
             val libDir = System.getProperty("axeron.library.path").orEmpty()
-            val helper = File(libDir, AxshConstants.DROP_HELPER)
+            val helper = File(libDir, RootlessConstants.DROP_HELPER)
             if (!helper.canExecute()) {
-                throw SecurityException("Rootless debugging unavailable: ${AxshConstants.DROP_HELPER} not found in $libDir")
+                throw SecurityException("Rootless debugging unavailable: ${RootlessConstants.DROP_HELPER} not found in $libDir")
             }
-            AxshConstants.rootlessArgv(helper.path, argv!!)
+            RootlessConstants.rootlessArgv(helper.path, argv!!)
         } else {
             cmd
         }
@@ -965,7 +960,25 @@ open class AxeronService :
             capabilities.get(uid) ?: ClientCapability(this, uid).also { capabilities.put(uid, it) }
         }
 
-    fun getClientCapability(uid: Int): IBinder? {
+    override fun setWakeLock(enabled: Boolean) {
+        enforceManagerPermission("setWakeLock")
+    }
+
+    override fun isWakeLockHeld(): Boolean = false
+
+    override fun setPreferSystemBinaries(prefer: Boolean) {
+        enforceManagerPermission("setPreferSystemBinaries")
+    }
+
+    override fun getFlagsForUids(uids: IntArray, mask: Int): IntArray {
+        if (!checkCaller(getCallingUid())) {
+            LOGGER.w("getFlagsForUids is allowed to be called only from the manager")
+            return IntArray(uids.size)
+        }
+        return IntArray(uids.size) { i -> getFlagsForUidInternal(uids[i], mask) }
+    }
+
+    override fun getClientCapability(uid: Int): IBinder? {
         enforceManagerPermission("getClientCapability")
         if (uid < 0 || checkCaller(uid)) return asBinder()
         return capabilityOf(uid)
@@ -979,117 +992,83 @@ open class AxeronService :
 
     fun startAxsh() {
         val server = AxshServer(
-            launcherFor = { uid -> createAxshLauncher(uid) },
+            server = { this },
             authorize = { uid, _ -> checkAxshCaller(uid) }
         )
         axshServer = server
         server.start()
     }
 
-    internal fun isAskingTransaction(code: Int): Boolean =
-        code == TRANSACTION_attachApplication ||
-            code == TRANSACTION_requestPermission ||
-            code == TRANSACTION_checkSelfPermission ||
-            code == TRANSACTION_shouldShowRequestPermissionRationale ||
-            code == TRANSACTION_getServerInfo
-
-    internal fun isManagerOnlyTransaction(code: Int): Boolean =
-        code == TRANSACTION_isFirstInit ||
-            code == TRANSACTION_enableShizukuService ||
-            code == TRANSACTION_setNewEnvironment ||
-            code == TRANSACTION_attachUserService ||
-            code == TRANSACTION_dispatchPermissionConfirmationResult ||
-            code == TRANSACTION_getFlagsForUid ||
-            code == TRANSACTION_updateFlagsForUid ||
-            code == TRANSACTION_exit ||
-            code == ServerConstants.BINDER_TRANSACTION_getApplications ||
-            code == AxshConstants.TRANSACTION_GET_CLIENT_CAPABILITY
-
-    internal fun dispatchClientTransaction(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean =
-        onTransact(code, data, reply, flags)
-
-    private fun createAxshLauncher(boundUid: Int? = null): IAxshLauncher = object : IAxshLauncher.Stub() {
-
-        override fun getEnvironment(): Array<String>? =
-            this@AxeronService.getEnvironment(TYPE_ENV)?.getEnv()
-
-        override fun newAxshProcess(
-            cmd: Array<out String?>?,
-            env: Array<out String?>?,
-            stdin: ParcelFileDescriptor?,
-            stdout: ParcelFileDescriptor?,
-            stderr: ParcelFileDescriptor?,
-            pty: Boolean,
-            size: Long,
-            status: ParcelFileDescriptor?
-        ): IAxshProcess {
-            try {
-                val uid = boundUid ?: Binder.getCallingUid()
-                if (!checkAxshCaller(uid)) {
-                    enforceCallingPermission("newAxshProcess")
-                }
-
-                val argv = cmd?.filterNotNull()?.toTypedArray()
-                require(!argv.isNullOrEmpty()) { "empty command" }
-                requireNotNull(stdin) { "stdin" }
-                requireNotNull(stdout) { "stdout" }
-
-                val lowered = android.os.Process.myUid() == 0 &&
-                    getFlagsForUidInternal(uid, AxshConstants.FLAG_AXSH_ROOTLESS) != 0
-                val command = if (lowered) {
-                    val libDir = System.getProperty("axeron.library.path").orEmpty()
-                    val helper = File(libDir, AxshConstants.DROP_HELPER)
-                    if (!helper.canExecute()) {
-                        throw SecurityException("Rootless debugging unavailable: ${AxshConstants.DROP_HELPER} not found in $libDir")
-                    }
-                    AxshConstants.rootlessArgv(helper.path, argv)
-                } else {
-                    argv
-                }
-                LOGGER.d(
-                    "newAxshProcess: uid=%d, pty=%s, cmd=%s",
-                    uid,
-                    pty.toString(),
-                    command.contentToString()
-                )
-
-                val owner = if (boundUid == null) {
-                    clientManager.findClient(uid, Binder.getCallingPid())?.client?.asBinder()
-                } else null
-                return AxshProcess.start(
-                    command, env?.filterNotNull()?.toTypedArray(), null,
-                    stdin, stdout, stderr, pty, size, status, owner
-                )
-            } catch (e: Throwable) {
-                for (fd in arrayOf(stdin, stdout, stderr, status)) {
-                    try {
-                        fd?.close()
-                    } catch (_: Exception) {
-                    }
-                }
-                throw e
-            }
-        }
-
-        override fun openAxshChannel(): ParcelFileDescriptor {
-            val uid = boundUid ?: Binder.getCallingUid()
+    override fun newAxshProcess(
+        cmd: Array<out String?>?,
+        env: Array<out String?>?,
+        dir: String?,
+        stdin: ParcelFileDescriptor?,
+        stdout: ParcelFileDescriptor?,
+        stderr: ParcelFileDescriptor?,
+        pty: Boolean,
+        size: Long,
+        status: ParcelFileDescriptor?
+    ): IAxshProcess {
+        val peerUid = AxshServer.consumePeerUid()
+        try {
+            val uid = peerUid ?: Binder.getCallingUid()
             if (!checkAxshCaller(uid)) {
-                throw SecurityException("Not allowed by fOxygen")
+                enforceCallingPermission("newAxshProcess")
             }
-            val server = axshServer ?: throw IllegalStateException("axsh server not running")
-            return server.openChannel(uid)
-        }
 
-        override fun getAxshSocketName(): String? {
-            val uid = boundUid ?: Binder.getCallingUid()
-            if (!checkAxshCaller(uid)) {
-                throw SecurityException("Not allowed by fOxygen")
+            val argv = cmd?.filterNotNull()?.toTypedArray()
+            require(!argv.isNullOrEmpty()) { "empty command" }
+            requireNotNull(stdin) { "stdin" }
+            requireNotNull(stdout) { "stdout" }
+
+            val lowered = android.os.Process.myUid() == 0 &&
+                getFlagsForUidInternal(uid, RootlessConstants.FLAG_AXSH_ROOTLESS) != 0
+            val command = if (lowered) {
+                val libDir = System.getProperty("axeron.library.path").orEmpty()
+                val helper = File(libDir, RootlessConstants.DROP_HELPER)
+                if (!helper.canExecute()) {
+                    throw SecurityException("Rootless debugging unavailable: ${RootlessConstants.DROP_HELPER} not found in $libDir")
+                }
+                RootlessConstants.rootlessArgv(helper.path, argv)
+            } else {
+                argv
             }
-            return axshServer?.socketName
+            LOGGER.d(
+                "newAxshProcess: uid=%d, pty=%s, cmd=%s",
+                uid,
+                pty.toString(),
+                command.contentToString()
+            )
+
+            val owner = if (peerUid == null) {
+                clientManager.findClient(uid, Binder.getCallingPid())?.client?.asBinder()
+            } else null
+            return ShellProcess.start(
+                command, env?.filterNotNull()?.toTypedArray(), dir,
+                stdin, stdout, stderr, pty, size, status, owner
+            )
+        } catch (e: Throwable) {
+            for (fd in arrayOf(stdin, stdout, stderr, status)) {
+                try {
+                    fd?.close()
+                } catch (_: Exception) {
+                }
+            }
+            throw e
         }
     }
 
-    private val axshLauncher: IAxshLauncher = createAxshLauncher(null)
+    override fun openAxshChannel(): ParcelFileDescriptor {
+        enforceCallingPermission("openAxshChannel")
+        val server = axshServer ?: throw IllegalStateException("axsh server not running")
+        return server.openChannel(getCallingUid())
+    }
+
+    override fun getAxshSocketName(): String? {
+        enforceCallingPermission("getAxshSocketName")
+        return axshServer?.socketName
+    }
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code == ServerConstants.BINDER_TRANSACTION_getApplications) {
@@ -1099,20 +1078,6 @@ open class AxeronService :
             val result: ParcelableListSlice<PackageInfo?> = getApplications(userId)
             reply!!.writeNoException()
             result.writeToParcel(reply, Parcelable.PARCELABLE_WRITE_RETURN_VALUE)
-            return true
-        }
-        if (code == AxshConstants.TRANSACTION_GET_LAUNCHER) {
-            data.enforceInterface(BINDER_DESCRIPTOR)
-            reply!!.writeNoException()
-            reply.writeStrongBinder(axshLauncher.asBinder())
-            return true
-        }
-        if (code == AxshConstants.TRANSACTION_GET_CLIENT_CAPABILITY) {
-            data.enforceInterface(BINDER_DESCRIPTOR)
-            val targetUid = data.readInt()
-            val cap = getClientCapability(targetUid)
-            reply!!.writeNoException()
-            reply.writeStrongBinder(cap)
             return true
         }
         return super.onTransact(code, data, reply, flags)

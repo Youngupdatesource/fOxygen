@@ -1,16 +1,8 @@
-package frb.axeron.axsh
+package frb.axeron.server
 
-object AxshConstants {
+object RootlessConstants {
 
     const val MANAGER_PACKAGE = "com.foxygen.manager"
-
-    const val SERVICE_DESCRIPTOR = "frb.axeron.server.IAxeronService"
-
-    const val TRANSACTION_GET_LAUNCHER = 10002
-
-    const val TRANSACTION_GET_CLIENT_CAPABILITY = 10003
-
-    const val EXTRA_UID = "axsh.uid"
 
     const val FLAG_AXSH_ROOTLESS = 1 shl 9
 

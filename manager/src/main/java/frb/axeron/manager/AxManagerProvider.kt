@@ -75,7 +75,7 @@ class AxManagerProvider : AxeronProvider() {
                             )
                             )
                             reply!!.putParcelable(EXTRA_BINDER,
-                                BinderContainer(Axeron.getShizukuService().asBinder())
+                                BinderContainer(Axeron.getShizukuService()?.asBinder())
                             )
                         } catch (e: Throwable) {
                             LOGGER.e(e, "attachUserService $token")

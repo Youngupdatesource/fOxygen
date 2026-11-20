@@ -694,7 +694,7 @@ suspend fun saveLogsToDownload(
             .toSet()
         // Streamed line by line off the main thread: unlimited output can exceed the heap.
         withContext(Dispatchers.IO) {
-            Axeron.newFileService().getStreamSession(file.absolutePath, true, false)
+            (Axeron.newFileService() ?: error("File service unavailable")).getStreamSession(file.absolutePath, true, false)
                 .outputStream.use { terminal.writeTo(it) { type -> type in saved } }
         }
 

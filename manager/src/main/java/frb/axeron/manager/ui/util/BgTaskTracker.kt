@@ -2,6 +2,7 @@ package frb.axeron.manager.ui.util
 
 import android.util.Log
 import frb.axeron.api.Axeron
+import frb.axeron.shell.Axsh
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -95,7 +96,7 @@ class BgTaskTracker(
         if (pgid <= 1) return false
         if (!Axeron.pingBinder()) return null
         return try {
-            val check = Axeron.newProcess(
+            val check = Axsh.exec(
                 arrayOf(
                     "/system/bin/sh", "-c",
                     "kill -s 0 -- -$pgid 2>/dev/null || kill -0 -- -$pgid 2>/dev/null"

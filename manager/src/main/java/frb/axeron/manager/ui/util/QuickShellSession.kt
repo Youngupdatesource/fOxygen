@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import frb.axeron.api.Axeron
+import frb.axeron.shell.Axsh
 import frb.axeron.server.Environment
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -116,7 +117,7 @@ class QuickShellSession(private val application: Application) {
 
     private fun startNewProcess(command: String, compatMode: Boolean) {
         val process = try {
-            Axeron.newProcess(sessionCmd(command, compatMode), serverEnv(), null)
+            Axsh.exec(sessionCmd(command, compatMode), serverEnv()?.env, null)
         } catch (e: Throwable) {
             postError("Failed to start process: ${e.message}")
             return
@@ -188,7 +189,7 @@ class QuickShellSession(private val application: Application) {
         // Never 0, 1 or -1: that would reach this uid's every process.
         if (pgid <= 1) return false
         return try {
-            val kill = Axeron.newProcess(
+            val kill = Axsh.exec(
                 arrayOf("/system/bin/sh", "-c", "kill -s TERM -- -$pgid"),
                 null,
                 null

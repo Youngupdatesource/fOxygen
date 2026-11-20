@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.provider.Settings
 import frb.axeron.api.Axeron
+import frb.axeron.shell.Axsh
 import frb.axeron.api.AxeronPluginService
 import frb.axeron.manager.R
 import frb.axeron.server.Environment
@@ -114,7 +115,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
         val alias = type.alias
 
         return try {
-            Axeron.newProcess(arrayOf("settings", "put", alias, key, value)).waitFor() == 0
+            Axsh.exec(arrayOf("settings", "put", alias, key, value)).waitFor() == 0
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -126,7 +127,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
         val alias = type.alias
 
         return try {
-            Axeron.newProcess(arrayOf("settings", "delete", alias, key)).waitFor() == 0
+            Axsh.exec(arrayOf("settings", "delete", alias, key)).waitFor() == 0
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -169,7 +170,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
         val map = mutableMapOf<String, String>()
 
         try {
-            val process = Axeron.newProcess(arrayOf("settings", "list", alias))
+            val process = Axsh.exec(arrayOf("settings", "list", alias))
             process.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
                     val splitIndex = line.indexOf('=')
@@ -192,7 +193,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
     private fun getAndroidProp(key: String): String? {
         if (!Axeron.pingBinder()) return null
         return try {
-            val process = Axeron.newProcess(arrayOf(AxeronPluginService.RESETPROP, key))
+            val process = Axsh.exec(arrayOf(AxeronPluginService.RESETPROP, key))
             process.inputStream.bufferedReader().use { it.readText().trim() }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -203,7 +204,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
     private fun setAndroidProp(key: String, value: String): Boolean {
         if (!Axeron.pingBinder()) return false
         return try {
-            Axeron.newProcess(arrayOf(AxeronPluginService.RESETPROP, key, value)).waitFor() == 0
+            Axsh.exec(arrayOf(AxeronPluginService.RESETPROP, key, value)).waitFor() == 0
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -214,7 +215,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
         if (!Axeron.pingBinder()) return emptyMap()
         val map = mutableMapOf<String, String>()
         try {
-            val process = Axeron.newProcess(AxeronPluginService.RESETPROP)
+            val process = Axsh.newProcess(AxeronPluginService.RESETPROP)
             process.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
                     val match = Regex("\\[(.+?)]: \\[(.*?)]").find(line)
@@ -233,11 +234,11 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
     // ======= Linux Env =======
 
     private fun getAxeronEnv(key: String): String? =
-        if (Axeron.pingBinder()) Axeron.getEnvironment().envMap[key] else null
+        if (Axeron.pingBinder()) Axeron.getEnvironment()?.envMap?.get(key) else null
 
 
     private val envMap: Map<String, String>
-        get() = Axeron.getEnvironment(TYPE_NEW_ENV).envMap
+        get() = Axeron.getEnvironment(TYPE_NEW_ENV)?.envMap ?: emptyMap()
 
     private fun setAxeronEnv(key: String, value: String): Boolean {
         if (!Axeron.pingBinder()) return false
@@ -267,7 +268,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
 
     private fun getAllLinuxEnv(): Map<String, String> {
         if (!Axeron.pingBinder()) return emptyMap()
-        return Axeron.getEnvironment().envMap
+        return Axeron.getEnvironment()?.envMap ?: emptyMap()
     }
 
     private companion object {

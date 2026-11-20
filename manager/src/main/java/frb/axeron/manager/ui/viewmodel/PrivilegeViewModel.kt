@@ -11,7 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import frb.axeron.api.Axeron
-import frb.axeron.axsh.AxshConstants
+import frb.axeron.server.RootlessConstants
 import frb.axeron.manager.ui.util.HanziToPinyin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -133,13 +133,13 @@ class PrivilegeViewModel(application: Application) : AndroidViewModel(applicatio
         get() = runCatching { Axeron.pingBinder() && Axeron.getAxeronInfo().isRoot() }.getOrDefault(false)
 
     fun axshRootless(uid: Int): Boolean =
-        (Axeron.getFlagsForUid(uid, AxshConstants.FLAG_AXSH_ROOTLESS) and AxshConstants.FLAG_AXSH_ROOTLESS) != 0
+        (Axeron.getFlagsForUid(uid, RootlessConstants.FLAG_AXSH_ROOTLESS) and RootlessConstants.FLAG_AXSH_ROOTLESS) != 0
 
     fun setAxshRootless(uid: Int, enabled: Boolean) {
         Axeron.updateFlagsForUid(
             uid,
-            AxshConstants.FLAG_AXSH_ROOTLESS,
-            if (enabled) AxshConstants.FLAG_AXSH_ROOTLESS else 0
+            RootlessConstants.FLAG_AXSH_ROOTLESS,
+            if (enabled) RootlessConstants.FLAG_AXSH_ROOTLESS else 0
         )
     }
 

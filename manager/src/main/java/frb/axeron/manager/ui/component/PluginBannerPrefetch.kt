@@ -58,7 +58,7 @@ internal fun readPluginBannerBytes(plugin: PluginInfo): ByteArray? = try {
         plugin.prop.id
     )
     Axeron.newFileService()
-        .setFileInputStream(File(dir, plugin.prop.banner).absolutePath)
+        ?.setFileInputStream(File(dir, plugin.prop.banner).absolutePath)
         ?.use { it.readBytes() }
 } catch (e: Exception) {
     null

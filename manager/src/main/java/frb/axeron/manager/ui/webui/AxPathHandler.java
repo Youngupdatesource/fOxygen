@@ -114,9 +114,11 @@ public class AxPathHandler implements AxWebLoader.PathHandler {
             File file = getCanonicalFileIfChild(mDirectory, path);
             if (file != null) {
                 Log.d(TAG, "Requested path: " + getCanonicalDirPath(file));
+                var fs = Axeron.newFileService();
+                if (fs == null) return null;
                 InputStream is = handleSvgzStream(
                         file.getPath(),
-                        Axeron.newFileService().setFileInputStream(getCanonicalDirPath(file))
+                        fs.setFileInputStream(getCanonicalDirPath(file))
                 );
 //                if (is == null) {
 //                    Log.d(TAG, "Requested path is null: " + getCanonicalDirPath(file));

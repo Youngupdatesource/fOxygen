@@ -13,7 +13,7 @@ import androidx.lifecycle.viewModelScope
 import frb.axeron.api.Axeron
 import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.utils.AnsiFilter
-import frb.axeron.axerish.R
+import frb.axeron.manager.R
 import frb.axeron.manager.ui.util.BgTaskTracker
 import frb.axeron.manager.ui.util.QuickShellSession
 import frb.axeron.manager.ui.util.RootlessShell

@@ -12,7 +12,8 @@ import coil.decode.ImageDecoderDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.topjohnwu.superuser.Shell
-import frb.axeron.Axerish
+import frb.axeron.api.Axeron
+import frb.axeron.shell.AxBroker
 import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.core.Engine
 import frb.axeron.manager.service.ServerWatch
@@ -35,8 +36,7 @@ class AxeronApplication : Engine(), ImageLoaderFactory {
 
         init {
 //            logd("ShizukuApplication", "init")
-            Axerish.initialize(BuildConfig.APPLICATION_ID)
-            Shell.setDefaultBuilder(createShellBuilder())
+
             Shell.enableLegacyStderrRedirection = true
             Shell.enableVerboseLogging = BuildConfig.DEBUG
 
@@ -53,6 +53,8 @@ class AxeronApplication : Engine(), ImageLoaderFactory {
         super.attachBaseContext(base)
         axeronApp = this
         AxeronSettings.initialize(axeronApp)
+        AxBroker.start(this) { Axeron.getBinder() }
+        Shell.setDefaultBuilder(createShellBuilder())
     }
 
     override fun onCreate() {

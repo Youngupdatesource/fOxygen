@@ -10,9 +10,9 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import frb.axeron.api.Axeron
-import frb.axeron.axsh.AxshConstants
 import frb.axeron.server.ServerConstants
 import frb.axeron.shared.AxeronApiConstant
+import frb.axeron.shell.KeepAlive
 import java.util.concurrent.atomic.AtomicBoolean
 
 object ShellBinderRequestHandler {
@@ -33,7 +33,7 @@ object ShellBinderRequestHandler {
 
         val bundle = intent.getBundleExtra("data")
         val receiver = bundle?.getBinder("binder")
-        val uid = bundle?.getInt(AxshConstants.EXTRA_UID, -1) ?: -1
+        val uid = bundle?.getInt(KeepAlive.EXTRA_UID, -1) ?: -1
         if (receiver == null) {
             onDone()
             return false
@@ -72,29 +72,20 @@ object ShellBinderRequestHandler {
         return true
     }
 
-    /**
-     * Mints a UID-scoped [frb.axeron.server.ClientCapability] from the server when the requester
-     * supplied its uid, so non-manager callers never receive the manager's unrestricted binder.
-     */
     private fun resolveClientBinder(serverBinder: IBinder?, uid: Int): IBinder? {
         if (serverBinder == null || !serverBinder.pingBinder()) return null
         if (uid <= 0 || uid == Process.myUid()) return serverBinder
-        val data = Parcel.obtain()
-        val reply = Parcel.obtain()
         return try {
-            data.writeInterfaceToken(AxshConstants.SERVICE_DESCRIPTOR)
-            data.writeInt(uid)
-            serverBinder.transact(AxshConstants.TRANSACTION_GET_CLIENT_CAPABILITY, data, reply, 0)
-            reply.readException()
-            reply.readStrongBinder() ?: serverBinder
+            Axeron.getClientCapability(uid) ?: serverBinder
         } catch (e: Throwable) {
             Log.w(TAG, "getClientCapability failed for uid=$uid", e)
             serverBinder
-        } finally {
-            data.recycle()
-            reply.recycle()
         }
     }
+
+    private fun keepAlive(uid: Int): Int =
+        if (uid < 0) KeepAlive.OFF
+        else KeepAlive.fromFlags(Axeron.getFlagsForUid(uid, KeepAlive.MASK))
 
     private fun reply(context: Context, receiver: IBinder, axeronBinder: IBinder?, uid: Int) {
         val scopedBinder = resolveClientBinder(axeronBinder, uid)
@@ -103,6 +94,7 @@ object ShellBinderRequestHandler {
             data.writeStrongBinder(scopedBinder)
             data.writeLong(AxeronApiConstant.server.VERSION_CODE)
             data.writeString(context.applicationInfo.nativeLibraryDir)
+            data.writeInt(if (scopedBinder != null) keepAlive(uid) else KeepAlive.OFF)
             receiver.transact(1, data, null, IBinder.FLAG_ONEWAY)
         } catch (e: Throwable) {
             Log.w(TAG, "reply failed", e)

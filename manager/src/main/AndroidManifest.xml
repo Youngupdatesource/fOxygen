@@ -126,6 +126,10 @@
             android:theme="@style/Theme.AxManager" />
 
         <receiver
+            android:name="frb.axeron.manager.receiver.BinderRequestReceiver"
+            android:exported="true" />
+
+        <receiver
             android:name="frb.axeron.server.shell.BinderRequestReceiver"
             android:directBootAware="true"
             android:enabled="true"

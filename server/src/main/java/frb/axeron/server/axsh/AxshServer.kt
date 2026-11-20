@@ -5,9 +5,9 @@ import android.os.ParcelFileDescriptor
 import android.system.Os
 import android.system.OsConstants
 import android.util.SparseArray
-import frb.axeron.axsh.IAxshLauncher
-import frb.axeron.axsh.Sessions
+import frb.axeron.server.IAxeronService
 import frb.axeron.server.util.Logger
+import frb.axeron.shell.Sessions
 import java.io.FileDescriptor
 import java.io.IOException
 import java.security.SecureRandom
@@ -17,17 +17,21 @@ import kotlin.concurrent.thread
  * Native `axsh` clients connect to the abstract socket [socketName] wherever SELinux lets them
  * (root mode) and run the shared [Sessions] protocol right here, without the binder round
  * trip a broker needs. Callers are identified by SO_PEERCRED.
- *
- * The name is new on every start and only told to allowed apps (getAxshSocketName), so an app
- * that isn't can't find the socket, let alone knock on it.
  */
 class AxshServer(
-    private val launcherFor: (uid: Int) -> IAxshLauncher,
+    private val server: () -> IAxeronService,
     private val authorize: (uid: Int, pid: Int) -> Boolean,
 ) : Sessions.Host {
 
     companion object {
         private val LOGGER = Logger("AxshServer")
+        private val currentPeerUid = ThreadLocal<Int?>()
+
+        fun consumePeerUid(): Int? {
+            val uid = currentPeerUid.get()
+            currentPeerUid.remove()
+            return uid
+        }
     }
 
     val socketName: String = "axeron." +
@@ -43,12 +47,6 @@ class AxshServer(
 
     fun stop() = sessions.stop()
 
-    /**
-     * A channel for a helper running as [uid] (axsh's native daemon), which can't connect to
-     * [socketName] under SELinux but can hold a socket we made. Each byte it sends carries one
-     * client socket (SCM_RIGHTS) that it accepted; the session is then served here, exactly as
-     * if the client had connected to us. Returns the helper's end.
-     */
     fun openChannel(uid: Int): ParcelFileDescriptor {
         val pair = ParcelFileDescriptor.createSocketPair()
         synchronized(channels) {
@@ -128,10 +126,11 @@ class AxshServer(
 
     override fun ignore(uid: Int, pid: Int): Boolean = !authorize(uid, pid)
 
-    override fun refuse(uid: Int, pid: Int): String? =
-        if (authorize(uid, pid)) null else Sessions.DENIED_MESSAGE
+    override fun refuse(uid: Int, pid: Int): String? {
+        if (!authorize(uid, pid)) return Sessions.DENIED_MESSAGE
+        currentPeerUid.set(uid)
+        return null
+    }
 
-    override fun launcher(): IAxshLauncher = launcherFor(Os.getuid())
-
-    override fun launcher(uid: Int): IAxshLauncher = launcherFor(uid)
+    override fun service(): IAxeronService = server()
 }

@@ -126,7 +126,7 @@ suspend fun loadPluginBannerBitmap(context: Context, plugin: PluginInfo): Bitmap
                     plugin.prop.id
                 )
                 val stream = Axeron.newFileService()
-                    .setFileInputStream(File(dir, banner).absolutePath)
+                    ?.setFileInputStream(File(dir, banner).absolutePath)
                 val bytes = stream?.use { it.readLimited(SHORTCUT_IMAGE_MAX_BYTES) }
                 bytes?.let { decodeShortcutBitmap(it) }
             }

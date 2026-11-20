@@ -330,4 +330,14 @@
     <string name="otg_activate">Activate</string>
     <string name="rootless_debugging">Rootless debugging</string>
     <string name="rootless_debugging_desc">Run QuickShell commands at the shell level (uid 2000, like adb shell) instead of root. Uses a small bundled helper (libaxdrop.so); if it cannot run, the command is not run. Only available in root mode.</string>
+    <string name="type_command">Type Command</string>
+    <string name="type_start">Type Start</string>
+    <string name="type_stdin">Type Input</string>
+    <string name="type_stdout">Type Output</string>
+    <string name="type_stderr">Type Error</string>
+    <string name="type_throw">Type Throw</string>
+    <string name="type_space">Type Space</string>
+    <string name="type_exit">Type Exit</string>
+    <string name="volume_up">Volume UP</string>
+    <string name="volume_down">Volume DOWN</string>
 </resources>

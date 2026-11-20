@@ -2,14 +2,18 @@ package frb.axeron.manager.ui.util
 
 import android.util.Log
 import com.topjohnwu.superuser.Shell
-import frb.axeron.Axerish
+import frb.axeron.manager.AxeronApplication.Companion.axeronApp
+import java.io.File
 
 private const val TAG = "AxeronCli"
+
+private val axshPath: String
+    get() = File(axeronApp.applicationInfo.nativeLibraryDir, "libaxsh.so").absolutePath
 
 fun createShellBuilder(globalMnt: Boolean = false): Shell.Builder {
     return Shell.Builder.create().run {
         val cmd = buildString {
-            append("sh ${Axerish.axrun_path.absolutePath}")
+            append("'$axshPath'")
             append(" || ")
             append("su")
             if (globalMnt) append(" --mount-master")
