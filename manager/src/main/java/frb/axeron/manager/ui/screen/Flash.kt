@@ -596,6 +596,6 @@ suspend fun flashIt(
             flashModulesSequentially(flashIt.installers, onStdout, onStderr)
         }
 
-        is FlashIt.FlashUninstall -> AxeronPluginService.resetManagerNative(onStdout, onStderr)
+        is FlashIt.FlashUninstall -> AxeronPluginService.resetManagerNative(Axeron.getAxeronInfo().isRoot(), onStdout, onStderr)
     }
 }

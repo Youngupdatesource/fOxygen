@@ -94,7 +94,7 @@ class CommandRunViewModel(application: Application) : AndroidViewModel(applicati
 
         val file = File(baseDir, "${prefix}_${date}.log")
         // Streamed line by line: unlimited output can be far bigger than the heap.
-        (Axeron.newFileService() ?: error("File service unavailable")).getStreamSession(file.absolutePath, true, false).outputStream.use {
+        (Axeron.newFileService()?.getStreamSession(file.absolutePath, true, false) ?: error("File service unavailable")).outputStream.use {
             terminal.writeTo(it)
         }
         file.absolutePath

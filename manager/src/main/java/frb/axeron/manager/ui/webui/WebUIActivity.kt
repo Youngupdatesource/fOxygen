@@ -111,10 +111,16 @@ class WebUIActivity : ComponentActivity() {
     }
 
     private suspend fun setupWebView() {
-        plugin = Axeron.getPluginById(intent.getStringExtra("id") ?: finishAndRemoveTask().let {
+        val pluginId = intent.getStringExtra("id") ?: run {
             Toast.makeText(this, "Plugin-Id not found", Toast.LENGTH_SHORT).show()
+            finishAndRemoveTask()
             return
-        })
+        }
+        plugin = Axeron.getPluginById(pluginId) ?: run {
+            Toast.makeText(this, "Plugin not found", Toast.LENGTH_SHORT).show()
+            finishAndRemoveTask()
+            return
+        }
 
         if (!plugin.hasWebUi || plugin.remove || !plugin.enabled) {
             Toast.makeText(

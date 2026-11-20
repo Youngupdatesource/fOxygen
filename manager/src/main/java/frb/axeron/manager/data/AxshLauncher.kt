@@ -60,8 +60,8 @@ object AxshLauncher {
 
     fun ensure(context: Context): Boolean {
         return try {
-            val fs = Axeron.newFileService() ?: return false
-            fs.getStreamSession(PATH, true, false).outputStream.use {
+            val session = Axeron.newFileService()?.getStreamSession(PATH, true, false) ?: return false
+            session.outputStream.use {
                 it.write(script(context).toByteArray())
             }
             true
