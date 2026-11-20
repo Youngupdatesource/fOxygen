@@ -72,6 +72,7 @@ subprojects {
         }
     }
     plugins.withId("com.android.library") {
+        apply(plugin = "org.jetbrains.kotlin.android")
         extensions.configure<LibraryExtension> {
             compileSdk = 36
             buildToolsVersion = "36.0.0"
