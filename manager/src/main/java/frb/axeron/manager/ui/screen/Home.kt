@@ -115,6 +115,7 @@ import frb.axeron.manager.ui.component.PrivilegeCard
 import frb.axeron.manager.ui.component.rememberConfirmDialog
 import frb.axeron.manager.ui.component.rememberLoadingDialog
 import frb.axeron.manager.ui.util.checkNewVersion
+import frb.axeron.manager.ui.util.isNewerVersion
 import frb.axeron.manager.ui.util.module.LatestVersionInfo
 import frb.axeron.manager.ui.viewmodel.ActivateViewModel
 import frb.axeron.manager.ui.viewmodel.ViewModelGlobal
@@ -685,8 +686,8 @@ fun UpdateCard() {
         }
     }
 
-    val currentVersionCode = BuildConfig.VERSION_CODE
-    val newVersionCode = newVersion.versionCode
+    val currentVersionName = BuildConfig.VERSION_NAME
+    val newVersionName = newVersion.versionName
     val newVersionUrl = newVersion.downloadUrl
     val changelog = newVersion.changelog
 
@@ -696,14 +697,14 @@ fun UpdateCard() {
     val newVersionAvailable = stringResource(R.string.new_version_available)
 
     AnimatedVisibility(
-        visible = newVersionCode > currentVersionCode,
+        visible = newVersionName.isNotEmpty() && isNewerVersion(newVersionName, currentVersionName),
         enter = fadeIn() + expandVertically(),
         exit = shrinkVertically() + fadeOut()
     ) {
         val updateDialog = rememberConfirmDialog(onConfirm = { uriHandler.openUri(newVersionUrl) })
         Box(Modifier.padding(bottom = 16.dp)) {
             WarningCard(
-                message = newVersionAvailable.format(newVersionCode),
+                message = newVersionAvailable.format(newVersionName),
                 MaterialTheme.colorScheme.outlineVariant
             ) {
                 if (changelog.isEmpty()) {

@@ -64,10 +64,25 @@ fun download(
     downloadManager.enqueue(request)
 }
 
+fun isNewerVersion(remote: String, current: String): Boolean {
+    fun parseParts(v: String): List<Int> =
+        v.trim().removePrefix("v").removePrefix("V")
+            .split(".")
+            .map { seg -> seg.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+
+    val r = parseParts(remote)
+    val c = parseParts(current)
+    val maxLen = maxOf(r.size, c.size)
+    for (i in 0 until maxLen) {
+        val rv = r.getOrElse(i) { 0 }
+        val cv = c.getOrElse(i) { 0 }
+        if (rv != cv) return rv > cv
+    }
+    return false
+}
+
 fun checkNewVersion(): LatestVersionInfo {
-    // Next version updates
     val url = "https://api.github.com/repos/Youngupdatesource/fOxygen/releases/latest"
-    // default null value if failed
     val defaultValue = LatestVersionInfo()
     runCatching {
         axeronApp.okhttpClient.newCall(Request.Builder().url(url).build()).execute()
@@ -77,29 +92,28 @@ fun checkNewVersion(): LatestVersionInfo {
                 }
                 val body = response.body?.string() ?: return defaultValue
                 val json = JSONObject(body)
+                val tagName = json.optString("tag_name").trim()
+                if (tagName.isEmpty()) return defaultValue
                 val changelog = json.optString("body")
+                var downloadUrl = json.optString("html_url")
 
-                val assets = json.getJSONArray("assets")
-                for (i in 0 until assets.length()) {
-                    val asset = assets.getJSONObject(i)
-                    val name = asset.getString("name")
-                    if (!name.endsWith(".apk")) {
-                        continue
+                val assets = json.optJSONArray("assets")
+                if (assets != null) {
+                    for (i in 0 until assets.length()) {
+                        val asset = assets.getJSONObject(i)
+                        val name = asset.optString("name")
+                        if (name.endsWith(".apk", ignoreCase = true)) {
+                            downloadUrl = asset.optString("browser_download_url", downloadUrl)
+                            break
+                        }
                     }
-
-                    val regex = Regex("v(.+?)_(\\d+)-")
-                    val matchResult = regex.find(name) ?: continue
-                    matchResult.groupValues[1]
-                    val versionCode = matchResult.groupValues[2].toInt()
-                    val downloadUrl = asset.getString("browser_download_url")
-
-                    return LatestVersionInfo(
-                        versionCode,
-                        downloadUrl,
-                        changelog
-                    )
                 }
 
+                return LatestVersionInfo(
+                    versionName = tagName,
+                    downloadUrl = downloadUrl,
+                    changelog = changelog
+                )
             }
     }
     return defaultValue
