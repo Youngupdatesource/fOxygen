@@ -17,7 +17,7 @@ on:
       tag:
         description: Release tag used when publishing
         type: string
-        default: v1.2
+        default: v1.3
 
 concurrency:
   group: build-${{ github.ref }}

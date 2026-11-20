@@ -12,7 +12,7 @@
 | --- | --- |
 | App name | fOxygen |
 | Package | `com.foxygen.manager` |
-| Version | 1.2 |
+| Version | 1.3 |
 | Modes | ADB (Wireless Debugging / TCP) and Root |
 | License | Apache License 2.0 |
 
@@ -87,7 +87,7 @@ AxManager explores a dedicated **ADB environment** on Android: instead of being 
 
 ## 🔧 Build & Install
 
-fOxygen no longer relies on git history for versioning: the version is fixed at **1.2** (`versionCode` comes from the shared `api` manifest). The application id is `com.foxygen.manager`; the Kotlin namespace stays `frb.axeron.manager` for compatibility with the upstream API.
+fOxygen no longer relies on git history for versioning: the version is fixed at **1.3** (`versionCode` is **15500**). The application id is `com.foxygen.manager`; the Kotlin namespace stays `frb.axeron.manager` for compatibility with the upstream API.
 
 ### Requirements
 - JDK 21
@@ -118,7 +118,7 @@ Then build:
 ./gradlew :manager:assembleRelease
 ```
 
-The APK is written to `manager/build/outputs/apk/release/` as `fOxygen_v1.2_<versionCode>-release_<timestamp>.apk`. Use `:manager:assembleDebug` for a debug build.
+The APK is written to `manager/build/outputs/apk/release/` as `fOxygen_v1.3_<versionCode>-release_<timestamp>.apk`. Use `:manager:assembleDebug` for a debug build.
 
 > Release builds strip `android.util.Log` calls through R8 rules. Use a debug build when you need to read the app or server logs.
 
@@ -158,7 +158,7 @@ If the signing secrets are missing or invalid, the workflow generates a temporar
 ### Publish a release
 
 ```bash
-gh workflow run build.yml -f build_type=Release -f publish=true -f tag=v1.2
+gh workflow run build.yml -f build_type=Release -f publish=true -f tag=v1.3
 ```
 
 Publishing requires valid signing secrets (the workflow refuses to publish an APK signed with a random key). It attaches the APK and its SHA-256 checksum to a GitHub release.

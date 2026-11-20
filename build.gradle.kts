@@ -16,8 +16,8 @@ plugins {
 }
 
 apply(from = "api/manifest.gradle.kts")
-val verCode = findProperty("api_version_code") as Int
-val verName = "1.2"
+val verCode = 15500
+val verName = "1.3"
 
 val localProperties = Properties().apply {
     val localPropertiesFile = rootProject.file("local.properties")
