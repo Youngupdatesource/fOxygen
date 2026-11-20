@@ -65,6 +65,7 @@ android {
     packaging {
         jniLibs {
             keepDebugSymbols += "**/libaxreignite.so"
+            keepDebugSymbols += "**/libaxshboot.so"
         }
     }
 }

@@ -297,7 +297,7 @@ open class AxeronService :
     }
 
     override fun onCreateUserServiceManager(): AxeronUserServiceManager {
-        return AxeronUserServiceManager(getEnvironment(TYPE_ENV)?.getEnv())
+        return AxeronUserServiceManager(getEnvironment(TYPE_ENV).env)
     }
 
     override fun onCreateClientManager(): AxeronClientManager {
@@ -545,7 +545,7 @@ open class AxeronService :
         cachedMergedEnv = null
         cachedNewEnv = null
         userServiceManager.environment =
-            getEnvironment(TYPE_ENV)?.getEnv()
+            getEnvironment(TYPE_ENV).env
     }
 
     fun checkRuntime(): Boolean {
@@ -649,7 +649,7 @@ open class AxeronService :
         if (clientRecord != null) {
             val entry = configManager.find(callingUid)
             val sameApp = entry?.packages.isNullOrEmpty() || entry!!.packages.contains(clientRecord.packageName)
-            if (entry != null && entry.isAllowed() && sameApp) {
+            if (entry != null && entry.isAllowed && sameApp) {
                 clientRecord.allowed = true
                 clientRecord.dispatchRequestPermissionResult(requestCode, true)
                 return
