@@ -90,6 +90,12 @@ subprojects {
         extensions.configure<KotlinAndroidProjectExtension> {
             compilerOptions {
                 jvmTarget.set(JvmTarget.JVM_21)
+                optIn.addAll(provider {
+                    val usesAxsh = path == ":axsh" || configurations.findByName("implementation")
+                        ?.dependencies
+                        ?.any { it.name == "axsh" } == true
+                    if (usesAxsh) listOf("frb.axeron.shell.InternalAxeronApi") else emptyList()
+                })
             }
         }
     }
