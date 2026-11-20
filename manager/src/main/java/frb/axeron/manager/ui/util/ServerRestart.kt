@@ -7,6 +7,7 @@ import frb.axeron.api.core.Starter
 import frb.axeron.manager.AxeronApplication.Companion.axeronApp
 import frb.axeron.manager.service.ServerGuard
 import frb.axeron.shell.Axsh
+import kotlinx.coroutines.runBlocking
 
 object ServerRestart {
 
@@ -32,7 +33,7 @@ object ServerRestart {
             // Fallback 2: cleanly stop the legacy server and start the new one via ServerGuard
             Log.w(TAG, "legacy server cannot exec restart directly; stopping and restarting via ServerGuard")
             runCatching { Axeron.destroy() }
-            runCatching { ServerGuard.restart(axeronApp) }
+            runCatching { runBlocking { ServerGuard.restart(axeronApp) } }
         }, "ServerRestart").start()
     }
 }
