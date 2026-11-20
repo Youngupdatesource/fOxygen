@@ -215,7 +215,7 @@ class SettingsRepository(private val contentResolver: ContentResolver) {
         if (!Axeron.pingBinder()) return emptyMap()
         val map = mutableMapOf<String, String>()
         try {
-            val process = Axsh.newProcess(AxeronPluginService.RESETPROP)
+            val process = Axsh.exec(arrayOf(AxeronPluginService.RESETPROP))
             process.inputStream.bufferedReader().useLines { lines ->
                 lines.forEach { line ->
                     val match = Regex("\\[(.+?)]: \\[(.*?)]").find(line)

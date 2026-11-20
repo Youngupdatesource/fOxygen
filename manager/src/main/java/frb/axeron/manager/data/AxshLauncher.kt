@@ -60,9 +60,18 @@ object AxshLauncher {
 
     fun ensure(context: Context): Boolean {
         return try {
-            val session = Axeron.newFileService()?.getStreamSession(PATH, true, false) ?: return false
+            val fs = Axeron.newFileService() ?: return false
+            val wanted = script(context)
+            val current = runCatching {
+                if (!fs.exists(PATH)) null
+                else fs.setFileInputStream(PATH)?.use { it.readBytes().decodeToString() }
+            }.getOrNull()
+            if (current == wanted) return true
+
+            File(PATH).parent?.let { fs.mkdirs(it) }
+            val session = fs.getStreamSession(PATH, true, false) ?: return false
             session.outputStream.use {
-                it.write(script(context).toByteArray())
+                it.write(wanted.toByteArray())
             }
             true
         } catch (e: Exception) {

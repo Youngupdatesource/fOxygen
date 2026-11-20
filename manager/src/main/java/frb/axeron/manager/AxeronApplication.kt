@@ -16,7 +16,9 @@ import frb.axeron.api.Axeron
 import frb.axeron.shell.AxBroker
 import frb.axeron.api.core.AxeronSettings
 import frb.axeron.api.core.Engine
+import frb.axeron.manager.data.AxshLauncher
 import frb.axeron.manager.service.ServerWatch
+import kotlin.concurrent.thread
 import frb.axeron.manager.ui.component.BannerFrameCache
 import frb.axeron.manager.ui.util.ThrottledAppIconFetcher
 import frb.axeron.manager.ui.util.createShellBuilder
@@ -55,6 +57,9 @@ class AxeronApplication : Engine(), ImageLoaderFactory {
         AxeronSettings.initialize(axeronApp)
         AxBroker.start(this) { Axeron.getBinder() }
         Shell.setDefaultBuilder(createShellBuilder())
+        Axeron.addBinderReceivedListenerSticky {
+            thread(name = "axsh-launcher") { AxshLauncher.ensure(this) }
+        }
     }
 
     override fun onCreate() {

@@ -274,9 +274,9 @@ fun PrivilegeScreen(
                         )
                     }
 
+                    val launchScope = rememberCoroutineScope()
                     if (app.hasTermuxLib && showSettings) {
                         val context = LocalContext.current
-                        val scope = rememberCoroutineScope()
                         val failedText = stringResource(R.string.privilege_open_terminal_failed)
                         val copiedText = stringResource(R.string.privilege_axsh_copied)
                         val notReadyText = stringResource(R.string.privilege_axsh_not_ready)
@@ -289,7 +289,7 @@ fun PrivilegeScreen(
                             onDismissRequest = { showSettings = false },
                             onLaunch = {
                                 showSettings = false
-                                scope.launch {
+                                launchScope.launch {
                                     val ready = withContext(Dispatchers.IO) {
                                         AxshLauncher.allowManageStorage(context, app.packageName)
                                         AxshLauncher.ensure(context)

@@ -633,7 +633,9 @@ open class AxeronService :
             Os.getpid(),
             SELinux.getContext(),
             starting,
-            checkRuntime()
+            checkRuntime(),
+            certDigest(MANAGER_APPLICATION_ID).orEmpty(),
+            checkCaller(getCallingUid())
         )
     }
 
@@ -829,6 +831,7 @@ open class AxeronService :
         }
 
         val reply = Bundle()
+        reply.putInt(AxeronApiConstant.server.BIND_APPLICATION_CLIENT_UID, callingUid)
         reply.putInt(BIND_APPLICATION_SERVER_UID, OsUtils.getUid())
         reply.putInt(BIND_APPLICATION_SERVER_VERSION, replyServerVersion)
         reply.putString(
